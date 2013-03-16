@@ -280,3 +280,78 @@ function and handling exceptions (``safe_call()``).  These functions
 are provided to allow other consumers to make use of the argument
 information.  This could be used to build a "Swiss army knife" command
 interpreter, for instance.
+
+In fact, such "Swiss army knife" command interpreters are supported
+directly by ``cli_tools``, through the use of such decorators as
+``@subparsers()``, ``@load_subcommands()``, and the ``@subcommand()``
+argument parser decorator.
+
+We begin by showing how to directly declare one function as a
+subcommand of another::
+
+    @console
+    def function():
+        """
+        Performs an action.
+        """
+        ...
+
+    @function.subcommand
+    def subcmd1():
+        """
+        Performs subcmd1.
+        """
+        ...
+
+    @function.subcommand('sub2')
+    def subcmd2():
+        """
+        Performs sub2.
+        """
+        ...
+
+In this example, we have defined two subcommands.  The subcommand
+defined by ``subcmd1()`` has a name derived from the function name,
+while the subcommand defined by ``subcmd2()`` has its name explicitly
+set to "sub2".
+
+It is also possible to load subcommands using a ``pkg_resources``
+entrypoint group, using the ``@load_subcommands()`` decorator like
+so::
+
+    @load_subcommands('example.subcommands')
+    def function():
+        """
+        Performs an action.
+        """
+        ...
+
+In this example, all functions listed under the "example.subcommands"
+entrypoint group will be added as subcommands of ``function()``, with
+the subcommand name being set to the name of the entrypoint.  For
+instance, if the following entrypoint entries existed::
+
+    entry_points={
+        'example.subcommands': [
+            'subcmd1 = your_module:subcommand1',
+            'subcmd2 = your_module:subcommand2',
+            'subcmd3 = other_module:subcommand3',
+         ],
+    }
+
+Then in the example above, the three subcommands "subcmd1", "subcmd2",
+and "subcmd3" would be defined.  (Carefully note that these
+entrypoints are *not* followed by the ".console" that was required in
+the "console_scripts" entrypoint.)
+
+As a final point, subcommands are handled by calling the
+``argparse.ArgumentParser.add_subparsers()`` method.  This method can
+take certain keyword arguments for nicer rendering of the help text;
+to set these arguments, use the ``@subparsers()`` decorator::
+
+    @subparsers(title="My subcommands")
+    def function():
+        """
+        Perform an action.
+        """
+        ...

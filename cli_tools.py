@@ -18,11 +18,12 @@ import inspect
 import sys
 
 import argparse
+import pkg_resources
 
 
 __all__ = ['console', 'prog', 'usage', 'description', 'epilog',
            'formatter_class', 'argument', 'argument_group',
-           'mutually_exclusive_group']
+           'mutually_exclusive_group', 'subparsers', 'load_subcommands']
 
 
 def _clean_text(text):
@@ -78,10 +79,12 @@ class ScriptAdaptor(object):
             # Set up the added functions
             func.args_hook = adaptor.args_hook
             func.processor = adaptor.processor
+            func.subcommand = adaptor.subcommand
             func.setup_args = adaptor.setup_args
             func.get_kwargs = adaptor.get_kwargs
             func.safe_call = adaptor.safe_call
             func.console = adaptor.console
+            func.get_subcommands = adaptor.get_subcommands
 
         return adaptor
 
@@ -97,11 +100,19 @@ class ScriptAdaptor(object):
         self._processor = lambda x: None
         self._arguments = []
         self._groups = {}
+        self._subcommands = {}
+        self.do_subs = False
+        self.subkwargs = {}
         self.prog = None
         self.usage = None
         self.description = _clean_text(func.__doc__)
         self.epilog = None
         self.formatter_class = argparse.HelpFormatter
+
+        # This will be an attribute name for the adaptor implementing
+        # the subcommand; this allows for the potential of arbitrary
+        # depth on subcommands
+        self._subcmd_attr = '_script_adaptor_%x' % id(self)
 
     def _add_argument(self, args, kwargs, group):
         """
@@ -155,6 +166,37 @@ class ScriptAdaptor(object):
 
         # Add the group to the argument specification list
         self._arguments.insert(0, ('group', group, kwargs))
+
+    def _add_subcommand(self, name, adaptor):
+        """
+        Add a subcommand to the parser.
+
+        :param name: The name of the command to be added.
+        :param adaptor: The corresponding ScriptAdaptor instance.
+        """
+
+        self._subcommands[name] = adaptor
+        self.do_subs = True
+
+    def _add_extensions(self, group):
+        """
+        Adds extensions to the parser.  This walks a ``pkg_resources``
+        entrypoint group, adding each discovered function that has an
+        attached ScriptAdaptor instance as a subcommand.  No attempt
+        is made to avoid duplication of subcommands.
+
+        :param group: The entrypoint group name.
+        """
+
+        for ep in pkg_resources.iter_entry_points(group):
+            try:
+                func = ep.load()
+                self._add_subcommand(ep.name, func._script_adaptor)
+            except (ImportError, pkg_resources.UnknownExtra, AttributeError):
+                pass
+
+        # We are now in subparsers mode
+        self.do_subs = True
 
     def args_hook(self, func):
         """
@@ -224,6 +266,55 @@ class ScriptAdaptor(object):
         self._processor = func
         return func
 
+    def subcommand(self, name=None):
+        """
+        Decorator used to mark another function as a subcommand of
+        this function.  If ``function()`` is the parent function, this
+        decorator can be used in any of the following ways:
+
+            @function.subcommand('spam')
+            def foo():
+                pass
+
+            @function.subcommand()
+            def bar():
+                pass
+
+            @function.subcommand
+            def baz():
+                pass
+
+        In the first case, the command name is set explicitly.  In the
+        latter two cases, the command name is the function name.
+
+        :param name: If a string, gives the name of the subcommand.
+                     If a callable, specifies the function being added
+                     as a subcommand.  If not specified, a decorator
+                     will be returned which will derive the name from
+                     the function.
+
+        :returns: If ``name`` was a callable, it will be returned.
+                  Otherwise, returns a callable which takes a callable
+                  as an argument and returns that callable, to conform
+                  with the decorator syntax.
+        """
+
+        def decorator(func):
+            cmdname = name or func.__name__
+            adaptor = self._get_adaptor(func)
+            self._add_subcommand(cmdname, adaptor)
+            return func
+
+        # If we were passed a callable, we were used without
+        # parentheses, and will derive the command name from the
+        # function...
+        if callable(name):
+            func = name
+            name = None
+            return decorator(func)
+
+        return decorator
+
     def setup_args(self, parser):
         """
         Set up an ``argparse.ArgumentParser`` object by adding all the
@@ -265,6 +356,23 @@ class ScriptAdaptor(object):
                 # Set up all the arguments
                 for a_args, a_kwargs in arguments:
                     group.add_argument(*a_args, **a_kwargs)
+
+        # If we have subcommands, set up the parser appropriately
+        if self.do_subs:
+            subparsers = parser.add_subparsers(**self.subkwargs)
+            for cmd, adaptor in self._subcommands.items():
+                cmd_parser = subparsers.add_parser(
+                    prog=adaptor.prog,
+                    usage=adaptor.usage,
+                    description=adaptor.description,
+                    epilog=adaptor.epilog,
+                    formatter_class=adaptor.formatter_class,
+                )
+                adaptor.setup_args(cmd_parser)
+
+                # Remember which adaptor implements the subcommand
+                defaults = {self._subcmd_attr: adaptor}
+                cmd_parser.set_defaults(**defaults)
 
         # If the hook has a post phase, run it
         if post:
@@ -317,33 +425,67 @@ class ScriptAdaptor(object):
 
         return kwargs
 
-    def safe_call(self, kwargs, args=None):
+    def safe_call(self, args):
         """
-        Call the underlying function safely.  If successful, the
-        function return value (likely ``None``) will be returned.  If
-        the underlying function raises an exception, the return value
-        will be the string value of the exception, unless an
-        ``argparse.Namespace`` object defining a ``debug`` attribute
-        of ``True`` is provided, in which case the exception will be
+        Call the processor and the underlying function.  If the
+        ``debug`` attribute of ``args`` exists and is ``True``, any
+        exceptions raised by the underlying function will be
         re-raised.
 
-        :param kwargs: A dictionary of keyword arguments to pass to
-                       the underlying function.
-        :param args: If provided, this should be an
-                     ``argparse.Namespace`` object with a ``debug``
-                     attribute set to a boolean value.
+        :param args: This should be an ``argparse.Namespace`` object;
+                     the keyword arguments for the function will be
+                     derived from it.
 
         :returns: A tuple of the function return value and exception
                   information.  Only one of these values will be
                   non-``None``.
         """
 
+        # Run the processor
+        post = None
+        if inspect.isgeneratorfunction(self._processor):
+            post = self._processor(args)
+            try:
+                post.next()
+            except StopIteration:
+                # Won't be doing any post-processing anyway
+                post = None
+        else:
+            self._processor(args)
+
+        # Initialize the results
+        result = None
+        exc_info = None
+
         try:
-            return self._func(**kwargs), None
+            # Call the function
+            result = self._func(**self.get_kwargs(args))
         except Exception:
             if args and getattr(args, 'debug', False):
+                # Re-raise if desired
                 raise
-            return None, sys.exc_info()
+            exc_info = sys.exc_info()
+
+        # If the processor has a post phase, run it
+        if post:
+            try:
+                if exc_info:
+                    # Overwrite the result and exception information
+                    result = post.throw(*exc_info)
+                    exc_info = None
+                else:
+                    result = post.send(result)
+            except StopIteration:
+                # No result replacement...
+                pass
+            except Exception:
+                # Overwrite the result and exception information
+                exc_info = sys.exc_info()
+                result = None
+
+            post.close()
+
+        return result, exc_info
 
     def console(self, args=None, argv=None):
         """
@@ -381,39 +523,30 @@ class ScriptAdaptor(object):
             self.setup_args(parser)
             args = parser.parse_args(args=argv)
 
-        # Next, let's run the processor
-        post = None
-        if inspect.isgeneratorfunction(self._processor):
-            post = self._processor(args)
-            try:
-                post.next()
-            except StopIteration:
-                # Won't be doing any post-processing anyway
-                post = None
+        # Get the adaptor
+        if self.do_subs:
+            # If the subcommand attribute isn't set, we'll call our
+            # underlying function
+            adaptor = getattr(args, self._subcmd_attr, self)
         else:
-            self._processor(args)
+            adaptor = self
 
         # Call the function
-        result, exc_info = self.safe_call(self.get_kwargs(args), args)
-
-        # If the processor has a post phase, run it
-        if post:
-            try:
-                if exc_info:
-                    result = post.throw(*exc_info)
-                else:
-                    result = post.send(result)
-            except StopIteration:
-                # No result replacement...
-                pass
-            except Exception:
-                exc_info = sys.exc_info()
-
-            post.close()
+        result, exc_info = adaptor.safe_call(args)
 
         if exc_info:
             return str(exc_info[1])
         return result
+
+    def get_subcommands(self):
+        """
+        Retrieve a dictionary of the recognized subcommands.
+
+        :returns: A dictionary mapping subcommand names to the
+                  implementing functions.
+        """
+
+        return dict((k, v._func) for k, v in self._subcommands.items())
 
 
 def console(func):
@@ -454,7 +587,7 @@ def usage(text):
 
     def decorator(func):
         adaptor = ScriptAdaptor._get_adaptor(func)
-        adaptor.usage = _clean_text(text)
+        adaptor.usage = text
         return func
     return decorator
 
@@ -470,7 +603,7 @@ def description(text):
 
     def decorator(func):
         adaptor = ScriptAdaptor._get_adaptor(func)
-        adaptor.description = _clean_text(text)
+        adaptor.description = text
         return func
     return decorator
 
@@ -485,7 +618,7 @@ def epilog(text):
 
     def decorator(func):
         adaptor = ScriptAdaptor._get_adaptor(func)
-        adaptor.epilog = _clean_text(text)
+        adaptor.epilog = text
         return func
     return decorator
 
@@ -554,5 +687,35 @@ def mutually_exclusive_group(group, **kwargs):
     def decorator(func):
         adaptor = ScriptAdaptor._get_adaptor(func)
         adaptor._add_group(group, 'exclusive', kwargs)
+        return func
+    return decorator
+
+
+def subparsers(**kwargs):
+    """
+    Decorator used to specify alternate keyword arguments to pass to
+    the ``argparse.ArgumentParser.add_subparsers()`` call.
+    """
+
+    def decorator(func):
+        adaptor = ScriptAdaptor._get_adaptor(func)
+        adaptor.subkwargs = kwargs
+        adaptor.do_subs = True
+        return func
+    return decorator
+
+
+def load_subcommands(group):
+    """
+    Decorator used to load subcommands from a given ``pkg_resources``
+    entrypoint group.  Each function must be appropriately decorated
+    with the ``cli_tools`` decorators to be considered an extension.
+
+    :param group: The name of the ``pkg_resources`` entrypoint group.
+    """
+
+    def decorator(func):
+        adaptor = ScriptAdaptor._get_adaptor(func)
+        adaptor._add_extensions(group)
         return func
     return decorator
