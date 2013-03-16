@@ -76,6 +76,7 @@ class ScriptAdaptor(object):
             func._script_adaptor = adaptor
 
             # Set up the added functions
+            func.args_hook = adaptor.args_hook
             func.processor = adaptor.processor
             func.setup_args = adaptor.setup_args
             func.get_kwargs = adaptor.get_kwargs
@@ -92,6 +93,7 @@ class ScriptAdaptor(object):
         """
 
         self._func = func
+        self._args_hook = lambda x: None
         self._processor = lambda x: None
         self._arguments = []
         self._groups = {}
@@ -154,6 +156,38 @@ class ScriptAdaptor(object):
         # Add the group to the argument specification list
         self._arguments.insert(0, ('group', group, kwargs))
 
+    def args_hook(self, func):
+        """
+        Sets a hook for constructing the arguments.  This hook could
+        be used to allow, for instance, a set of authentication
+        plugins to add their configuration options to the argument
+        parser.  This method may be used as a decorator, e.g.:
+
+            @console
+            def func():
+                pass
+
+            @func.args_hook
+            def _hook(parser):
+                pass
+
+        If the hook is a regular function, it will be called after
+        processing all of the regular argument specifications.
+
+        If the hook is a generator, the segment before the first
+        ``yield`` statement will be executed before adding any regular
+        argument specifications, and the remainder will be executed
+        afterward.
+
+        :param func: The function to be installed as an argument hook.
+
+        :returns: The function, allowing this method to be used as a
+                  decorator.
+        """
+
+        self._args_hook = func
+        return func
+
     def processor(self, func):
         """
         Sets a processor for the underlying function.  A processor
@@ -201,6 +235,16 @@ class ScriptAdaptor(object):
                        method.
         """
 
+        # Run the args hook, if it's a generator
+        post = self._args_hook
+        if inspect.isgeneratorfunction(self._args_hook):
+            post = self._args_hook(parser)
+            try:
+                post.next()
+            except StopIteration:
+                # Won't be doing any post-processing anyway
+                post = None
+
         for arg_type, args, kwargs in self._arguments:
             if arg_type == 'argument':
                 parser.add_argument(*args, **kwargs)
@@ -221,6 +265,17 @@ class ScriptAdaptor(object):
                 # Set up all the arguments
                 for a_args, a_kwargs in arguments:
                     group.add_argument(*a_args, **a_kwargs)
+
+        # If the hook has a post phase, run it
+        if post:
+            if inspect.isgenerator(post):
+                try:
+                    post.next()
+                except StopIteration:
+                    pass
+                post.close()
+            else:
+                post(parser)
 
     def get_kwargs(self, args):
         """
@@ -333,7 +388,7 @@ class ScriptAdaptor(object):
             try:
                 post.next()
             except StopIteration:
-                # Won't be any post-processing anyway
+                # Won't be doing any post-processing anyway
                 post = None
         else:
             self._processor(args)

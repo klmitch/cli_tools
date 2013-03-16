@@ -54,6 +54,7 @@ class TestScriptAdaptor(unittest2.TestCase):
 
         self.assertIsInstance(result, cli_tools.ScriptAdaptor)
         self.assertEqual(func._script_adaptor, result)
+        self.assertEqual(func.args_hook, result.args_hook)
         self.assertEqual(func.processor, result.processor)
         self.assertEqual(func.setup_args, result.setup_args)
         self.assertEqual(func.get_kwargs, result.get_kwargs)
@@ -61,15 +62,17 @@ class TestScriptAdaptor(unittest2.TestCase):
         self.assertEqual(func.console, result.console)
 
     def test_get_adaptor_set(self):
-        func = mock.Mock(__doc__='', processor='processor',
-                         setup_args='setup_args', get_kwargs='get_kwargs',
-                         safe_call='safe_call', console='console')
+        func = mock.Mock(__doc__='', args_hook='args_hook',
+                         processor='processor', setup_args='setup_args',
+                         get_kwargs='get_kwargs', safe_call='safe_call',
+                         console='console')
         sa = cli_tools.ScriptAdaptor(func)
         func._script_adaptor = sa
 
         result = cli_tools.ScriptAdaptor._get_adaptor(func)
 
         self.assertEqual(result, sa)
+        self.assertEqual(func.args_hook, 'args_hook')
         self.assertEqual(func.processor, 'processor')
         self.assertEqual(func.setup_args, 'setup_args')
         self.assertEqual(func.get_kwargs, 'get_kwargs')
@@ -81,6 +84,8 @@ class TestScriptAdaptor(unittest2.TestCase):
         sa = cli_tools.ScriptAdaptor(func)
 
         self.assertEqual(sa._func, func)
+        self.assertTrue(callable(sa._args_hook))
+        self.assertEqual(sa._args_hook('foo'), None)
         self.assertTrue(callable(sa._processor))
         self.assertEqual(sa._processor('foo'), None)
         self.assertEqual(sa._arguments, [])
@@ -133,6 +138,15 @@ class TestScriptAdaptor(unittest2.TestCase):
         self.assertRaises(argparse.ArgumentError, sa._add_group,
                           'group', 'group', dict(a=1, b=2, c=3))
 
+    def test_args_hook(self):
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+
+        result = sa.args_hook('func')
+
+        self.assertEqual(result, 'func')
+        self.assertEqual(sa._args_hook, 'func')
+
     def test_processor(self):
         func = mock.Mock(__doc__='')
         sa = cli_tools.ScriptAdaptor(func)
@@ -142,7 +156,9 @@ class TestScriptAdaptor(unittest2.TestCase):
         self.assertEqual(result, 'func')
         self.assertEqual(sa._processor, 'func')
 
-    def test_setup_args(self):
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
+    @mock.patch.object(inspect, 'isgenerator', return_value=False)
+    def test_setup_args(self, mock_isgenerator, mock_isgeneratorfunction):
         parser = mock.Mock()
         func = mock.Mock(__doc__='')
         sa = cli_tools.ScriptAdaptor(func)
@@ -198,6 +214,303 @@ class TestScriptAdaptor(unittest2.TestCase):
                 .add_argument(4, 5, 6, a=7, b=8, c=9),
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
         ])
+
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
+    @mock.patch.object(inspect, 'isgenerator', return_value=False)
+    def test_setup_args_hook_func(self, mock_isgenerator,
+                                  mock_isgeneratorfunction):
+        def hook(parser):
+            parser.hook()
+
+        parser = mock.Mock()
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+        sa._args_hook = mock.Mock(side_effect=hook)
+        sa._groups = {
+            'group_key': {
+                'type': 'group',
+                'arguments': [
+                    ((1, 2, 3), dict(a=4, b=5, c=6)),
+                    ((2, 3, 4), dict(a=5, b=6, c=7)),
+                ],
+            },
+            'exclusive_key': {
+                'type': 'exclusive',
+                'arguments': [
+                    ((3, 4, 5), dict(a=6, b=7, c=8)),
+                    ((4, 5, 6), dict(a=7, b=8, c=9)),
+                ],
+            },
+            'other_key': {
+                'type': 'other',
+                'arguments': [
+                    ((5, 6, 7), dict(a=8, b=9, c=0)),
+                    ((6, 7, 8), dict(a=9, b=0, c=1)),
+                ],
+            },
+        }
+        sa._arguments = [
+            ('argument', (7, 8, 9), dict(a=0, b=1, c=2)),
+            ('argument', (8, 9, 0), dict(a=1, b=2, c=3)),
+            ('group', 'group_key', dict(title='title', description='desc')),
+            ('argument', (9, 0, 1), dict(a=2, b=3, c=4)),
+            ('group', 'exclusive_key', dict(required=True)),
+            ('group', 'other_key', dict(something='nothing')),
+            ('argument', (0, 1, 2), dict(a=3, b=4, c=5)),
+            ('other', 'args', 'kwargs'),
+        ]
+
+        sa.setup_args(parser)
+
+        parser.assert_has_calls([
+            mock.call.add_argument(7, 8, 9, a=0, b=1, c=2),
+            mock.call.add_argument(8, 9, 0, a=1, b=2, c=3),
+            mock.call.add_argument_group(title='title', description='desc'),
+            mock.call.add_argument_group()
+                .add_argument(1, 2, 3, a=4, b=5, c=6),
+            mock.call.add_argument_group()
+                .add_argument(2, 3, 4, a=5, b=6, c=7),
+            mock.call.add_argument(9, 0, 1, a=2, b=3, c=4),
+            mock.call.add_mutually_exclusive_group(required=True),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(3, 4, 5, a=6, b=7, c=8),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(4, 5, 6, a=7, b=8, c=9),
+            mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
+            mock.call.hook(),
+        ])
+
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=True)
+    @mock.patch.object(inspect, 'isgenerator', return_value=True)
+    def test_setup_args_hook_gen(self, mock_isgenerator,
+                                 mock_isgeneratorfunction):
+        parser = mock.Mock()
+
+        def hook():
+            parser.hook()
+
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+        sa._args_hook = mock.Mock(return_value=mock.Mock(**{
+            'next.side_effect': hook,
+        }))
+        sa._groups = {
+            'group_key': {
+                'type': 'group',
+                'arguments': [
+                    ((1, 2, 3), dict(a=4, b=5, c=6)),
+                    ((2, 3, 4), dict(a=5, b=6, c=7)),
+                ],
+            },
+            'exclusive_key': {
+                'type': 'exclusive',
+                'arguments': [
+                    ((3, 4, 5), dict(a=6, b=7, c=8)),
+                    ((4, 5, 6), dict(a=7, b=8, c=9)),
+                ],
+            },
+            'other_key': {
+                'type': 'other',
+                'arguments': [
+                    ((5, 6, 7), dict(a=8, b=9, c=0)),
+                    ((6, 7, 8), dict(a=9, b=0, c=1)),
+                ],
+            },
+        }
+        sa._arguments = [
+            ('argument', (7, 8, 9), dict(a=0, b=1, c=2)),
+            ('argument', (8, 9, 0), dict(a=1, b=2, c=3)),
+            ('group', 'group_key', dict(title='title', description='desc')),
+            ('argument', (9, 0, 1), dict(a=2, b=3, c=4)),
+            ('group', 'exclusive_key', dict(required=True)),
+            ('group', 'other_key', dict(something='nothing')),
+            ('argument', (0, 1, 2), dict(a=3, b=4, c=5)),
+            ('other', 'args', 'kwargs'),
+        ]
+
+        sa.setup_args(parser)
+
+        parser.assert_has_calls([
+            mock.call.hook(),
+            mock.call.add_argument(7, 8, 9, a=0, b=1, c=2),
+            mock.call.add_argument(8, 9, 0, a=1, b=2, c=3),
+            mock.call.add_argument_group(title='title', description='desc'),
+            mock.call.add_argument_group()
+                .add_argument(1, 2, 3, a=4, b=5, c=6),
+            mock.call.add_argument_group()
+                .add_argument(2, 3, 4, a=5, b=6, c=7),
+            mock.call.add_argument(9, 0, 1, a=2, b=3, c=4),
+            mock.call.add_mutually_exclusive_group(required=True),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(3, 4, 5, a=6, b=7, c=8),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(4, 5, 6, a=7, b=8, c=9),
+            mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
+            mock.call.hook(),
+        ])
+        sa._args_hook.assert_called_once_with(parser)
+        sa._args_hook.return_value.assert_has_calls([
+            mock.call.next(),
+            mock.call.next(),
+            mock.call.close(),
+        ])
+        self.assertEqual(len(sa._args_hook.return_value.method_calls), 3)
+
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=True)
+    @mock.patch.object(inspect, 'isgenerator', return_value=False)
+    def test_setup_args_hook_gen_nopost(self, mock_isgenerator,
+                                        mock_isgeneratorfunction):
+        parser = mock.Mock()
+
+        def hook():
+            parser.hook()
+            raise StopIteration
+
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+        sa._args_hook = mock.Mock(return_value=mock.Mock(**{
+            'next.side_effect': hook,
+        }))
+        sa._groups = {
+            'group_key': {
+                'type': 'group',
+                'arguments': [
+                    ((1, 2, 3), dict(a=4, b=5, c=6)),
+                    ((2, 3, 4), dict(a=5, b=6, c=7)),
+                ],
+            },
+            'exclusive_key': {
+                'type': 'exclusive',
+                'arguments': [
+                    ((3, 4, 5), dict(a=6, b=7, c=8)),
+                    ((4, 5, 6), dict(a=7, b=8, c=9)),
+                ],
+            },
+            'other_key': {
+                'type': 'other',
+                'arguments': [
+                    ((5, 6, 7), dict(a=8, b=9, c=0)),
+                    ((6, 7, 8), dict(a=9, b=0, c=1)),
+                ],
+            },
+        }
+        sa._arguments = [
+            ('argument', (7, 8, 9), dict(a=0, b=1, c=2)),
+            ('argument', (8, 9, 0), dict(a=1, b=2, c=3)),
+            ('group', 'group_key', dict(title='title', description='desc')),
+            ('argument', (9, 0, 1), dict(a=2, b=3, c=4)),
+            ('group', 'exclusive_key', dict(required=True)),
+            ('group', 'other_key', dict(something='nothing')),
+            ('argument', (0, 1, 2), dict(a=3, b=4, c=5)),
+            ('other', 'args', 'kwargs'),
+        ]
+
+        sa.setup_args(parser)
+
+        parser.assert_has_calls([
+            mock.call.hook(),
+            mock.call.add_argument(7, 8, 9, a=0, b=1, c=2),
+            mock.call.add_argument(8, 9, 0, a=1, b=2, c=3),
+            mock.call.add_argument_group(title='title', description='desc'),
+            mock.call.add_argument_group()
+                .add_argument(1, 2, 3, a=4, b=5, c=6),
+            mock.call.add_argument_group()
+                .add_argument(2, 3, 4, a=5, b=6, c=7),
+            mock.call.add_argument(9, 0, 1, a=2, b=3, c=4),
+            mock.call.add_mutually_exclusive_group(required=True),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(3, 4, 5, a=6, b=7, c=8),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(4, 5, 6, a=7, b=8, c=9),
+            mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
+        ])
+        sa._args_hook.assert_called_once_with(parser)
+        sa._args_hook.return_value.assert_has_calls([
+            mock.call.next(),
+        ])
+        self.assertEqual(len(sa._args_hook.return_value.method_calls), 1)
+        self.assertFalse(mock_isgenerator.called)
+
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=True)
+    @mock.patch.object(inspect, 'isgenerator', return_value=True)
+    def test_setup_args_hook_gen_stop(self, mock_isgenerator,
+                                      mock_isgeneratorfunction):
+        do_stop = [False]
+        parser = mock.Mock()
+
+        def hook():
+            parser.hook()
+            if do_stop[0]:
+                raise StopIteration
+            else:
+                do_stop[0] = True
+
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+        sa._args_hook = mock.Mock(return_value=mock.Mock(**{
+            'next.side_effect': hook,
+        }))
+        sa._groups = {
+            'group_key': {
+                'type': 'group',
+                'arguments': [
+                    ((1, 2, 3), dict(a=4, b=5, c=6)),
+                    ((2, 3, 4), dict(a=5, b=6, c=7)),
+                ],
+            },
+            'exclusive_key': {
+                'type': 'exclusive',
+                'arguments': [
+                    ((3, 4, 5), dict(a=6, b=7, c=8)),
+                    ((4, 5, 6), dict(a=7, b=8, c=9)),
+                ],
+            },
+            'other_key': {
+                'type': 'other',
+                'arguments': [
+                    ((5, 6, 7), dict(a=8, b=9, c=0)),
+                    ((6, 7, 8), dict(a=9, b=0, c=1)),
+                ],
+            },
+        }
+        sa._arguments = [
+            ('argument', (7, 8, 9), dict(a=0, b=1, c=2)),
+            ('argument', (8, 9, 0), dict(a=1, b=2, c=3)),
+            ('group', 'group_key', dict(title='title', description='desc')),
+            ('argument', (9, 0, 1), dict(a=2, b=3, c=4)),
+            ('group', 'exclusive_key', dict(required=True)),
+            ('group', 'other_key', dict(something='nothing')),
+            ('argument', (0, 1, 2), dict(a=3, b=4, c=5)),
+            ('other', 'args', 'kwargs'),
+        ]
+
+        sa.setup_args(parser)
+
+        parser.assert_has_calls([
+            mock.call.hook(),
+            mock.call.add_argument(7, 8, 9, a=0, b=1, c=2),
+            mock.call.add_argument(8, 9, 0, a=1, b=2, c=3),
+            mock.call.add_argument_group(title='title', description='desc'),
+            mock.call.add_argument_group()
+                .add_argument(1, 2, 3, a=4, b=5, c=6),
+            mock.call.add_argument_group()
+                .add_argument(2, 3, 4, a=5, b=6, c=7),
+            mock.call.add_argument(9, 0, 1, a=2, b=3, c=4),
+            mock.call.add_mutually_exclusive_group(required=True),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(3, 4, 5, a=6, b=7, c=8),
+            mock.call.add_mutually_exclusive_group()
+                .add_argument(4, 5, 6, a=7, b=8, c=9),
+            mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
+            mock.call.hook(),
+        ])
+        sa._args_hook.assert_called_once_with(parser)
+        sa._args_hook.return_value.assert_has_calls([
+            mock.call.next(),
+            mock.call.next(),
+            mock.call.close(),
+        ])
+        self.assertEqual(len(sa._args_hook.return_value.method_calls), 3)
 
     @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
         ('a', 'b', 'c'), None, None, None))

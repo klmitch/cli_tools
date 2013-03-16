@@ -221,6 +221,54 @@ Note the ``try`` block around the first ``yield``, which allows the
 processor function to catch this special exception and do something
 appropriate.
 
+Argument Hooks
+==============
+
+It may be necessary to arbitrarily manipulate the argument parser
+before parsing the command line arguments.  For instance, a system
+which used pluggable authentication modules may need to allow those
+modules to add specific command line arguments.  This can be handled
+by declaring an argument hook::
+
+    @console
+    def function():
+        """
+        Performs an action.
+        """
+        ...
+
+    @function.args_hook
+    def _hook(parser):
+        parser.add_argument(...)
+
+Here we declare the function ``_hook()`` as an argument hook for the
+console script ``function()``.  After the declared arguments have been
+added to the parser, the hook will be called with the parser (an
+``argparse.ArgumentParser`` instance), which it can manipulate in any
+way.
+
+It is also possible to manipulate the parser prior to adding the
+declared arguments.  Consider the following example::
+
+    @console
+    def function():
+        """
+        Performs an action.
+        """
+        ...
+
+    @function.args_hook
+    def _hook(parser):
+        parser.add_argument(...)
+        yield
+
+Here we turn ``_hook()`` into a generator.  The statements preceding
+the first ``yield`` statement will be run immediately before adding
+the declared arguments, and can manipulate the parser in any way
+necessary.  If manipulation needs to be done after the declared
+arguments are added, that can be done in statements following the
+``yield`` statement.
+
 Advanced ``cli_tools`` Usage
 ============================
 
