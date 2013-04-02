@@ -23,11 +23,11 @@ def readfile(filename):
 
 setup(
     name='cli_tools',
-    version='0.2.0',
+    version='0.2.1',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
     description="Command Line Interface Tools",
-    py_modules=['cli_utils'],
+    py_modules=['cli_tools'],
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',
