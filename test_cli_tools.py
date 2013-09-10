@@ -704,6 +704,7 @@ class TestScriptAdaptor(unittest2.TestCase):
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
             mock.call.add_subparsers(a=1, b=2, c=3),
             mock.call.add_subparsers().add_parser(
+                'cmd',
                 prog='cmd_prog',
                 usage='cmd_usage',
                 description='cmd_description',
@@ -711,6 +712,7 @@ class TestScriptAdaptor(unittest2.TestCase):
                 formatter_class='cmd_formatter_class',
             ),
             mock.call.add_subparsers().add_parser(
+                'dmc',
                 prog='dmc_prog',
                 usage='dmc_usage',
                 description='dmc_description',

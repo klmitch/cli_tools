@@ -362,6 +362,7 @@ class ScriptAdaptor(object):
             subparsers = parser.add_subparsers(**self.subkwargs)
             for cmd, adaptor in self._subcommands.items():
                 cmd_parser = subparsers.add_parser(
+                    cmd,
                     prog=adaptor.prog,
                     usage=adaptor.usage,
                     description=adaptor.description,
