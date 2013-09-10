@@ -23,7 +23,7 @@ def readfile(filename):
 
 setup(
     name='cli_tools',
-    version='0.2.1',
+    version='0.2.2',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
     description="Command Line Interface Tools",
