@@ -1,2 +1,1 @@
 mock>=1.0b1
-unittest2

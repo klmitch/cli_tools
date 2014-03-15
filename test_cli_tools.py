@@ -15,11 +15,11 @@
 ## <http://www.gnu.org/licenses/>.
 
 import inspect
+import unittest
 
 import argparse
 import mock
 import pkg_resources
-import unittest2
 
 import cli_tools
 
@@ -28,7 +28,7 @@ class TestException(Exception):
     pass
 
 
-class TestCleanText(unittest2.TestCase):
+class TestCleanText(unittest.TestCase):
     def test_clean_text(self):
         text = """
             This is a\t
@@ -47,13 +47,13 @@ class TestCleanText(unittest2.TestCase):
         self.assertEqual(result, '')
 
 
-class TestScriptAdaptor(unittest2.TestCase):
+class TestScriptAdaptor(unittest.TestCase):
     def test_get_adaptor_unset(self):
         func = mock.Mock(__doc__='', _script_adaptor=None)
 
         result = cli_tools.ScriptAdaptor._get_adaptor(func)
 
-        self.assertIsInstance(result, cli_tools.ScriptAdaptor)
+        self.assertTrue(isinstance(result, cli_tools.ScriptAdaptor))
         self.assertEqual(func._script_adaptor, result)
         self.assertEqual(func.args_hook, result.args_hook)
         self.assertEqual(func.processor, result.processor)
@@ -1073,7 +1073,7 @@ class TestScriptAdaptor(unittest2.TestCase):
         self.assertEqual(result, dict(cmd='subcmd', dmc='subdmc'))
 
 
-class TestDecorators(unittest2.TestCase):
+class TestDecorators(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_get_adaptor',
                        return_value=mock.Mock())
     def test_console(self, mock_get_adaptor):
