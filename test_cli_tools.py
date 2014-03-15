@@ -214,7 +214,6 @@ class TestScriptAdaptor(unittest.TestCase):
             mock.call('group1'),
             mock.call('group2'),
         ], any_order=True)
-        print mock_add_subcommand.mock_calls
         mock_add_subcommand.assert_has_calls([
             mock.call('ep1', 'adaptor1'),
             mock.call('ep2', 'adaptor2'),
