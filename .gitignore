@@ -4,5 +4,6 @@
 /dist
 /cli_tools.egg-info
 /.tox
+*.egg
 *.log
-*.pyc
+*.py[co]

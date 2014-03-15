@@ -1,2 +1,2 @@
-include COPYING README.rst .requires .test-requires tox.ini
+include COPYING README.rst requirements.txt test-requirements.txt tox.ini
 include test_cli_tools.py

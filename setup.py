@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-import os
-
 from setuptools import setup
 
 
@@ -26,8 +24,9 @@ setup(
     version='0.2.2',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
+    url='https://github.com/klmitch/cli_utils',
     description="Command Line Interface Tools",
-    py_modules=['cli_tools'],
+    long_description=readfile('README.rst'),
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',
@@ -38,8 +37,7 @@ setup(
         'Programming Language :: Python',
         'Topic :: Software Development :: User Interfaces',
     ],
-    url='https://github.com/klmitch/cli_utils',
-    long_description=readfile('README.rst'),
-    install_requires=readreq('.requires'),
-    tests_require=readreq('.test-requires'),
+    py_modules=['cli_tools'],
+    requires=readreq('requirements.txt'),
+    tests_require=readreq('test-requirements.txt'),
 )
