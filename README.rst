@@ -366,3 +366,48 @@ to set these arguments, use the ``@subparsers()`` decorator::
         Perform an action.
         """
         ...
+
+Argument Completion
+===================
+
+The command line interface tools module does not provide any
+integration with shell argument completion directly.  However,
+``cli_tools`` uses the ``argparse`` module, and any argument
+completion framework that works with ``argparse`` can be used with it.
+As an example, consider the ``argcomplete`` module; here's an example
+of how it might be integrated into a ``cli_tools``-compatible CLI::
+
+    from cli_tools import *
+    import argcomplete
+
+    # PYTHON_ARGCOMPLETE_OK
+
+    @argument('--debug', '-d',
+              dest='debug',
+              action='store_true',
+              default=False,
+              help="Run the tool in debug mode.")
+    @argument('--dryrun', '--dry_run', '--dry-run', '-n',
+              dest='dry_run',
+              action='store_true',
+              default=False,
+              help="Perform a dry run.")
+    def function(dry_run=False):
+        """
+        Performs an action.
+        """
+        ...
+
+    @function.args_hook
+    def _hook(parser):
+        argcomplete.autocomplete(parser)
+
+Note the use of an argument hook to invoke the
+``argcomplete.autocomplete()`` function; for ``argcomplete``, this
+performs the actual argument completion.  Also note the comment
+containing ``PYTHON_ARGCOMPLETE_OK``, which enables ``argcomplete``'s
+global completion mode.
+
+For more information about ``argcomplete``, see:
+
+    https://pypi.python.org/pypi/argcomplete
