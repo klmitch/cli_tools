@@ -294,7 +294,7 @@ subcommand of another::
         """
         Performs an action.
         """
-        ...
+        pass
 
     @function.subcommand
     def subcmd1():
@@ -314,6 +314,17 @@ In this example, we have defined two subcommands.  The subcommand
 defined by ``subcmd1()`` has a name derived from the function name,
 while the subcommand defined by ``subcmd2()`` has its name explicitly
 set to "sub2".
+
+To introspect the declared subcommands, use the ``get_subcommands()``
+function which is also added to the decorated function.  The
+``get_subcommands()`` function returns a dictionary mapping the
+subcommand name to the function which implements that subcommand.  For
+instance, in the example above, ``function.get_subcommands()`` would
+return the dictionary ``{"subcmd1": subcmd1, "sub2": subcmd2}``.
+
+Note that, when using subcommands, the original function will never be
+called.  If no subcommand is passed on the command line, the
+underlying ``argparse`` module reports an error.
 
 It is also possible to load subcommands using a ``pkg_resources``
 entrypoint group, using the ``@load_subcommands()`` decorator like
