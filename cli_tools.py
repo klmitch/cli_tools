@@ -101,6 +101,7 @@ class ScriptAdaptor(object):
         self._arguments = []
         self._groups = {}
         self._subcommands = {}
+        self._entrypoints = set()
         self.do_subs = False
         self.subkwargs = {}
         self.prog = None
@@ -180,23 +181,41 @@ class ScriptAdaptor(object):
 
     def _add_extensions(self, group):
         """
-        Adds extensions to the parser.  This walks a ``pkg_resources``
-        entrypoint group, adding each discovered function that has an
-        attached ScriptAdaptor instance as a subcommand.  No attempt
-        is made to avoid duplication of subcommands.
+        Adds extensions to the parser.  This will cause a walk of a
+        ``pkg_resources`` entrypoint group, adding each discovered
+        function that has an attached ScriptAdaptor instance as a
+        subcommand.  This walk is performed immediately prior to
+        building the subcommand processor.  Note that no attempt is
+        made to avoid duplication of subcommands.
 
         :param group: The entrypoint group name.
         """
 
-        for ep in pkg_resources.iter_entry_points(group):
-            try:
-                func = ep.load()
-                self._add_subcommand(ep.name, func._script_adaptor)
-            except (ImportError, pkg_resources.UnknownExtra, AttributeError):
-                pass
+        self._entrypoints.add(group)
 
         # We are now in subparsers mode
         self.do_subs = True
+
+    def _process_entrypoints(self):
+        """
+        Perform a walk of all entrypoint groups declared using
+        ``_add_extensions()``.  This is called immediately prior to
+        building the subcommand processor.
+        """
+
+        # Walk the set of all declared entrypoints
+        for group in self._entrypoints:
+            for ep in pkg_resources.iter_entry_points(group):
+                try:
+                    func = ep.load()
+                    self._add_subcommand(ep.name, func._script_adaptor)
+                except (ImportError, AttributeError,
+                        pkg_resources.UnknownExtra):
+                    # Ignore any expected errors
+                    pass
+
+        # We've processed these entrypoints; avoid double-processing
+        self._entrypoints = set()
 
     def args_hook(self, func):
         """
@@ -359,6 +378,7 @@ class ScriptAdaptor(object):
 
         # If we have subcommands, set up the parser appropriately
         if self.do_subs:
+            self._process_entrypoints()
             subparsers = parser.add_subparsers(**self.subkwargs)
             for cmd, adaptor in self._subcommands.items():
                 cmd_parser = subparsers.add_parser(
@@ -547,6 +567,14 @@ class ScriptAdaptor(object):
                   implementing functions.
         """
 
+        # We only have a return value if we're in subparsers mode
+        if not self.do_subs:
+            return {}
+
+        # Process any declared entrypoints
+        self._process_entrypoints()
+
+        # Return the subcommands dictionary
         return dict((k, v._func) for k, v in self._subcommands.items())
 
 

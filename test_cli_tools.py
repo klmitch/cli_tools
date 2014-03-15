@@ -103,6 +103,7 @@ class TestScriptAdaptor(unittest.TestCase):
         self.assertEqual(sa._arguments, [])
         self.assertEqual(sa._groups, {})
         self.assertEqual(sa._subcommands, {})
+        self.assertEqual(sa._entrypoints, set())
         self.assertEqual(sa.do_subs, False)
         self.assertEqual(sa.subkwargs, {})
         self.assertEqual(sa.prog, None)
@@ -164,33 +165,62 @@ class TestScriptAdaptor(unittest.TestCase):
         self.assertEqual(sa._subcommands, dict(cmd='adaptor', dmc='rotpada'))
         self.assertEqual(sa.do_subs, True)
 
-    @mock.patch.object(pkg_resources, 'iter_entry_points', return_value=[
-        mock.Mock(**{'load.side_effect': ImportError}),
-        mock.Mock(**{'load.side_effect': pkg_resources.UnknownExtra}),
-        mock.Mock(**{'load.side_effect': AttributeError}),
-        mock.Mock(**{
-            'load.return_value': mock.Mock(_script_adaptor='adaptor'),
-        }),
-        mock.Mock(**{
-            'load.return_value': mock.Mock(_script_adaptor='rotpada'),
-        }),
-    ])
-    @mock.patch.object(cli_tools.ScriptAdaptor, '_add_subcommand')
-    def test_add_extensions(self, mock_add_subcommand, mock_iter_entry_points):
-        mock_iter_entry_points.return_value[-2].name = 'cmd'
-        mock_iter_entry_points.return_value[-1].name = 'dmc'
-
+    def test_add_extensions(self):
         func = mock.Mock(__doc__='')
         sa = cli_tools.ScriptAdaptor(func)
 
-        sa._add_extensions('entrypoint.group')
+        sa._add_extensions('group1')
+        sa._add_extensions('group2')
 
-        mock_iter_entry_points.assert_called_once_with('entrypoint.group')
-        mock_add_subcommand.assert_has_calls([
-            mock.call('cmd', 'adaptor'),
-            mock.call('dmc', 'rotpada'),
-        ])
+        self.assertEqual(sa._entrypoints, set(['group1', 'group2']))
         self.assertEqual(sa.do_subs, True)
+
+    @mock.patch.object(pkg_resources, 'iter_entry_points')
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_add_subcommand')
+    def test_process_entrypoints(self, mock_add_subcommand,
+                                 mock_iter_entry_points):
+        eps = {
+            'ep1': mock.Mock(**{
+                'load.return_value': mock.Mock(_script_adaptor='adaptor1'),
+            }),
+            'ep2': mock.Mock(**{
+                'load.return_value': mock.Mock(_script_adaptor='adaptor2'),
+            }),
+            'ep3': mock.Mock(**{
+                'load.return_value': mock.Mock(_script_adaptor='adaptor3'),
+            }),
+        }
+        for name, ep in eps.items():
+            ep.name = name
+        ep_groups = {
+            'group1': [
+                mock.Mock(**{'load.side_effect': ImportError}),
+                mock.Mock(**{'load.side_effect': pkg_resources.UnknownExtra}),
+                mock.Mock(**{'load.side_effect': AttributeError}),
+                eps['ep1'],
+                eps['ep2'],
+            ],
+            'group2': [eps['ep3']],
+        }
+        mock_iter_entry_points.side_effect = lambda x: ep_groups[x]
+
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+        sa._entrypoints = set(['group1', 'group2'])
+
+        sa._process_entrypoints()
+
+        mock_iter_entry_points.assert_has_calls([
+            mock.call('group1'),
+            mock.call('group2'),
+        ], any_order=True)
+        print mock_add_subcommand.mock_calls
+        mock_add_subcommand.assert_has_calls([
+            mock.call('ep1', 'adaptor1'),
+            mock.call('ep2', 'adaptor2'),
+            mock.call('ep3', 'adaptor3'),
+        ], any_order=True)
+        self.assertEqual(sa._entrypoints, set())
 
     def test_args_hook(self):
         func = mock.Mock(__doc__='')
@@ -262,9 +292,11 @@ class TestScriptAdaptor(unittest.TestCase):
         mock_get_adaptor.assert_called_once_with(subcmd)
         mock_add_subcommand.assert_called_once_with('subcmd', 'adaptor')
 
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
     @mock.patch.object(inspect, 'isgenerator', return_value=False)
-    def test_setup_args(self, mock_isgenerator, mock_isgeneratorfunction):
+    def test_setup_args(self, mock_isgenerator, mock_isgeneratorfunction,
+                        mock_process_entrypoints):
         parser = mock.Mock()
         func = mock.Mock(__doc__='')
         sa = cli_tools.ScriptAdaptor(func)
@@ -320,11 +352,14 @@ class TestScriptAdaptor(unittest.TestCase):
                 .add_argument(4, 5, 6, a=7, b=8, c=9),
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
         ])
+        self.assertFalse(mock_process_entrypoints.called)
 
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
     @mock.patch.object(inspect, 'isgenerator', return_value=False)
     def test_setup_args_hook_func(self, mock_isgenerator,
-                                  mock_isgeneratorfunction):
+                                  mock_isgeneratorfunction,
+                                  mock_process_entrypoints):
         def hook(parser):
             parser.hook()
 
@@ -385,11 +420,14 @@ class TestScriptAdaptor(unittest.TestCase):
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
             mock.call.hook(),
         ])
+        self.assertFalse(mock_process_entrypoints.called)
 
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=True)
     @mock.patch.object(inspect, 'isgenerator', return_value=True)
     def test_setup_args_hook_gen(self, mock_isgenerator,
-                                 mock_isgeneratorfunction):
+                                 mock_isgeneratorfunction,
+                                 mock_process_entrypoints):
         parser = mock.Mock()
 
         def hook():
@@ -461,11 +499,14 @@ class TestScriptAdaptor(unittest.TestCase):
             mock.call.close(),
         ])
         self.assertEqual(len(sa._args_hook.return_value.method_calls), 3)
+        self.assertFalse(mock_process_entrypoints.called)
 
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=True)
     @mock.patch.object(inspect, 'isgenerator', return_value=False)
     def test_setup_args_hook_gen_nopost(self, mock_isgenerator,
-                                        mock_isgeneratorfunction):
+                                        mock_isgeneratorfunction,
+                                        mock_process_entrypoints):
         parser = mock.Mock()
 
         def hook():
@@ -536,11 +577,14 @@ class TestScriptAdaptor(unittest.TestCase):
         ])
         self.assertEqual(len(sa._args_hook.return_value.method_calls), 1)
         self.assertFalse(mock_isgenerator.called)
+        self.assertFalse(mock_process_entrypoints.called)
 
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=True)
     @mock.patch.object(inspect, 'isgenerator', return_value=True)
     def test_setup_args_hook_gen_stop(self, mock_isgenerator,
-                                      mock_isgeneratorfunction):
+                                      mock_isgeneratorfunction,
+                                      mock_process_entrypoints):
         do_stop = [False]
         parser = mock.Mock()
 
@@ -617,11 +661,14 @@ class TestScriptAdaptor(unittest.TestCase):
             mock.call.close(),
         ])
         self.assertEqual(len(sa._args_hook.return_value.method_calls), 3)
+        self.assertFalse(mock_process_entrypoints.called)
 
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
     @mock.patch.object(inspect, 'isgenerator', return_value=False)
     def test_setup_args_subcmds(self, mock_isgenerator,
-                                mock_isgeneratorfunction):
+                                mock_isgeneratorfunction,
+                                mock_process_entrypoints):
         cmd_parser = mock.Mock(name='cmd')
         dmc_parser = mock.Mock(name='dmc')
         parser = mock.Mock(**{
@@ -728,6 +775,7 @@ class TestScriptAdaptor(unittest.TestCase):
         dmc_parser.set_defaults.assert_called_once_with(**{
             sa._subcmd_attr: dmc_adaptor,
         })
+        mock_process_entrypoints.assert_called_once_with()
 
     @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
         ('a', 'b', 'c'), None, None, None))
@@ -1060,7 +1108,8 @@ class TestScriptAdaptor(unittest.TestCase):
         adaptor.safe_call.assert_called_once_with(args)
         self.assertEqual(result, 'tluser')
 
-    def test_get_subcommands(self):
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
+    def test_get_subcommands_nosubs(self, mock_process_entrypoints):
         func = mock.Mock(__doc__='')
         sa = cli_tools.ScriptAdaptor(func)
         sa._subcommands = mock.Mock(**{'items.return_value': [
@@ -1070,7 +1119,23 @@ class TestScriptAdaptor(unittest.TestCase):
 
         result = sa.get_subcommands()
 
+        self.assertEqual(result, {})
+        self.assertFalse(mock_process_entrypoints.called)
+
+    @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
+    def test_get_subcommands(self, mock_process_entrypoints):
+        func = mock.Mock(__doc__='')
+        sa = cli_tools.ScriptAdaptor(func)
+        sa._subcommands = mock.Mock(**{'items.return_value': [
+            ('cmd', mock.Mock(_func='subcmd')),
+            ('dmc', mock.Mock(_func='subdmc')),
+        ]})
+        sa.do_subs = True
+
+        result = sa.get_subcommands()
+
         self.assertEqual(result, dict(cmd='subcmd', dmc='subdmc'))
+        mock_process_entrypoints.assert_called_once_with()
 
 
 class TestDecorators(unittest.TestCase):
