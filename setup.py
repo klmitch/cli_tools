@@ -21,7 +21,7 @@ def readfile(filename):
 
 setup(
     name='cli_tools',
-    version='0.2.4',
+    version='0.2.5',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
     url='https://github.com/klmitch/cli_utils',
@@ -41,6 +41,6 @@ setup(
         'Topic :: Software Development :: User Interfaces',
     ],
     py_modules=['cli_tools'],
-    requires=readreq('requirements.txt'),
+    install_requires=readreq('requirements.txt'),
     tests_require=readreq('test-requirements.txt'),
 )
