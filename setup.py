@@ -24,7 +24,7 @@ setup(
     version='0.2.5',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
-    url='https://github.com/klmitch/cli_utils',
+    url='https://github.com/klmitch/cli_tools',
     description="Command Line Interface Tools",
     long_description=readfile('README.rst'),
     classifiers=[
