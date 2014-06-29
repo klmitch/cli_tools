@@ -14,12 +14,13 @@
 # along with this program.  If not, see
 # <http://www.gnu.org/licenses/>.
 
+import argparse
 import inspect
 import unittest
 
-import argparse
 import mock
 import pkg_resources
+import six
 
 import cli_tools
 
@@ -28,7 +29,7 @@ class TestException(Exception):
     pass
 
 
-class TestCleanText(unittest.TestCase):
+class CleanTextTest(unittest.TestCase):
     def test_clean_text(self):
         text = """
             This is a\t
@@ -47,7 +48,45 @@ class TestCleanText(unittest.TestCase):
         self.assertEqual(result, '')
 
 
-class TestScriptAdaptor(unittest.TestCase):
+class ExposeTest(unittest.TestCase):
+    def test_basic(self):
+        @cli_tools.expose
+        def test_func():
+            pass
+
+        self.assertTrue(test_func._cli_expose)
+
+
+class ScriptAdaptorMeta(unittest.TestCase):
+    def test_new(self):
+        class TestObject(object):
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        @six.add_metaclass(cli_tools.ScriptAdaptorMeta)
+        class SAMTest(object):
+            def test_func1(self):
+                pass
+
+            @cli_tools.expose
+            def test_func2(self):
+                pass
+
+            def test_func3(self):
+                pass
+
+            @cli_tools.expose
+            def test_func4(self):
+                pass
+
+            attr1 = TestObject()
+            attr2 = TestObject(_cli_expose=False)
+            attr3 = TestObject(_cli_expose=True)
+
+        self.assertEqual(SAMTest.exposed, set(['test_func2', 'test_func4']))
+
+
+class ScriptAdaptorTest(unittest.TestCase):
     def test_get_adaptor_unset(self):
         func = mock.Mock(__doc__='', _script_adaptor=None)
 
@@ -1137,7 +1176,7 @@ class TestScriptAdaptor(unittest.TestCase):
         mock_process_entrypoints.assert_called_once_with()
 
 
-class TestDecorators(unittest.TestCase):
+class DecoratorsTest(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_get_adaptor',
                        return_value=mock.Mock())
     def test_console(self, mock_get_adaptor):

@@ -14,11 +14,12 @@
 # along with this program.  If not, see
 # <http://www.gnu.org/licenses/>.
 
+import argparse
 import inspect
 import sys
 
-import argparse
 import pkg_resources
+import six
 
 
 __all__ = ['console', 'prog', 'usage', 'description', 'epilog',
@@ -53,6 +54,55 @@ def _clean_text(text):
     return ' '.join(desc)
 
 
+def expose(func):
+    """
+    A decorator for ``ScriptAdaptor`` methods.  Methods so decorated
+    will be exposed on the function decorated by ``cli_tools``.  This
+    has no effect on classes decorated by ``cli_tools``.
+
+    :param func: The function to expose.
+
+    :returns: The function.
+    """
+
+    # Just set the expose attribute on the function.
+    func._cli_expose = True
+    return func
+
+
+class ScriptAdaptorMeta(type):
+    """
+    A metaclass for ``ScriptAdaptor``.  This builds a list of the
+    names of methods that have been decorated with ``@expose``.  This
+    is used to copy the exposed methods onto a decorated function.
+    """
+
+    def __new__(mcs, name, bases, namespace):
+        """
+        Create the ``ScriptAdaptor`` class.  This ensures that an
+        ``exposed`` class attribute is set to the set of method names
+        that should be exposed on a decorated function.
+
+        :param name: The class name.
+        :param bases: A tuple of the base classes.
+        :param namespace: A dictionary containing the class namespace.
+
+        :returns: The constructed class.
+        """
+
+        # Build up the set of exposed method names
+        exposed = set()
+        for name, value in namespace.items():
+            if callable(value) and getattr(value, '_cli_expose', False):
+                exposed.add(name)
+        namespace['exposed'] = exposed
+
+        # Construct and return the class
+        return super(ScriptAdaptorMeta, mcs).__new__(mcs, name, bases,
+                                                     namespace)
+
+
+@six.add_metaclass(ScriptAdaptorMeta)
 class ScriptAdaptor(object):
     """
     An adaptor for the function.  Keeps track of the declared command
@@ -77,14 +127,8 @@ class ScriptAdaptor(object):
             func._script_adaptor = adaptor
 
             # Set up the added functions
-            func.args_hook = adaptor.args_hook
-            func.processor = adaptor.processor
-            func.subcommand = adaptor.subcommand
-            func.setup_args = adaptor.setup_args
-            func.get_kwargs = adaptor.get_kwargs
-            func.safe_call = adaptor.safe_call
-            func.console = adaptor.console
-            func.get_subcommands = adaptor.get_subcommands
+            for meth in cls.exposed:
+                setattr(func, meth, getattr(adaptor, meth))
 
         return adaptor
 
@@ -217,6 +261,7 @@ class ScriptAdaptor(object):
         # We've processed these entrypoints; avoid double-processing
         self._entrypoints = set()
 
+    @expose
     def args_hook(self, func):
         """
         Sets a hook for constructing the arguments.  This hook could
@@ -249,6 +294,7 @@ class ScriptAdaptor(object):
         self._args_hook = func
         return func
 
+    @expose
     def processor(self, func):
         """
         Sets a processor for the underlying function.  A processor
@@ -285,6 +331,7 @@ class ScriptAdaptor(object):
         self._processor = func
         return func
 
+    @expose
     def subcommand(self, name=None):
         """
         Decorator used to mark another function as a subcommand of
@@ -334,6 +381,7 @@ class ScriptAdaptor(object):
 
         return decorator
 
+    @expose
     def setup_args(self, parser):
         """
         Set up an ``argparse.ArgumentParser`` object by adding all the
@@ -406,6 +454,7 @@ class ScriptAdaptor(object):
             else:
                 post(parser)
 
+    @expose
     def get_kwargs(self, args):
         """
         Given an ``argparse.Namespace``, as produced by
@@ -446,6 +495,7 @@ class ScriptAdaptor(object):
 
         return kwargs
 
+    @expose
     def safe_call(self, args):
         """
         Call the processor and the underlying function.  If the
@@ -508,6 +558,7 @@ class ScriptAdaptor(object):
 
         return result, exc_info
 
+    @expose
     def console(self, args=None, argv=None):
         """
         Call the function as a console script.  Command line arguments
@@ -559,6 +610,7 @@ class ScriptAdaptor(object):
             return str(exc_info[1])
         return result
 
+    @expose
     def get_subcommands(self):
         """
         Retrieve a dictionary of the recognized subcommands.
