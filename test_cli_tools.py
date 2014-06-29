@@ -87,13 +87,14 @@ class ScriptAdaptorMeta(unittest.TestCase):
 
 
 class ScriptAdaptorTest(unittest.TestCase):
-    def test_get_adaptor_unset(self):
-        func = mock.Mock(__doc__='', _script_adaptor=None)
+    @mock.patch('inspect.isclass', return_value=False)
+    def test_get_adaptor_unset(self, mock_isclass):
+        func = mock.Mock(__doc__='', cli_tools=None)
 
         result = cli_tools.ScriptAdaptor._get_adaptor(func)
 
         self.assertTrue(isinstance(result, cli_tools.ScriptAdaptor))
-        self.assertEqual(func._script_adaptor, result)
+        self.assertEqual(func.cli_tools, result)
         self.assertEqual(func.args_hook, result.args_hook)
         self.assertEqual(func.processor, result.processor)
         self.assertEqual(func.subcommand, result.subcommand)
@@ -102,8 +103,10 @@ class ScriptAdaptorTest(unittest.TestCase):
         self.assertEqual(func.safe_call, result.safe_call)
         self.assertEqual(func.console, result.console)
         self.assertEqual(func.get_subcommands, result.get_subcommands)
+        mock_isclass.assert_called_once_with(func)
 
-    def test_get_adaptor_set(self):
+    @mock.patch('inspect.isclass', return_value=False)
+    def test_get_adaptor_set(self, mock_isclass):
         func = mock.Mock(
             __doc__='',
             args_hook='args_hook',
@@ -115,8 +118,8 @@ class ScriptAdaptorTest(unittest.TestCase):
             console='console',
             get_subcommands='get_subcommands',
         )
-        sa = cli_tools.ScriptAdaptor(func)
-        func._script_adaptor = sa
+        sa = cli_tools.ScriptAdaptor(func, False)
+        func.cli_tools = sa
 
         result = cli_tools.ScriptAdaptor._get_adaptor(func)
 
@@ -129,12 +132,44 @@ class ScriptAdaptorTest(unittest.TestCase):
         self.assertEqual(func.safe_call, 'safe_call')
         self.assertEqual(func.console, 'console')
         self.assertEqual(func.get_subcommands, 'get_subcommands')
+        self.assertFalse(mock_isclass.called)
 
-    def test_init(self):
+    @mock.patch('inspect.isclass', return_value=True)
+    def test_get_adaptor_class(self, mock_isclass):
+        func = mock.Mock(
+            __doc__='',
+            args_hook='args_hook',
+            processor='processor',
+            subcommand='subcommand',
+            setup_args='setup_args',
+            get_kwargs='get_kwargs',
+            safe_call='safe_call',
+            console='console',
+            get_subcommands='get_subcommands',
+            cli_tools=None,
+        )
+
+        result = cli_tools.ScriptAdaptor._get_adaptor(func)
+
+        self.assertTrue(isinstance(result, cli_tools.ScriptAdaptor))
+        self.assertEqual(func.args_hook, 'args_hook')
+        self.assertEqual(func.processor, 'processor')
+        self.assertEqual(func.subcommand, 'subcommand')
+        self.assertEqual(func.setup_args, 'setup_args')
+        self.assertEqual(func.get_kwargs, 'get_kwargs')
+        self.assertEqual(func.safe_call, 'safe_call')
+        self.assertEqual(func.console, 'console')
+        self.assertEqual(func.get_subcommands, 'get_subcommands')
+        mock_isclass.assert_called_once_with(func)
+
+    @mock.patch('inspect.isclass', return_value=True)
+    def test_init_notclass(self, mock_isclass):
         func = mock.Mock(__doc__="description")
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         self.assertEqual(sa._func, func)
+        self.assertFalse(sa._is_class)
+        self.assertEqual(sa._run, None)
         self.assertTrue(callable(sa._args_hook))
         self.assertEqual(sa._args_hook('foo'), None)
         self.assertTrue(callable(sa._processor))
@@ -151,10 +186,89 @@ class ScriptAdaptorTest(unittest.TestCase):
         self.assertEqual(sa.epilog, None)
         self.assertEqual(sa.formatter_class, argparse.HelpFormatter)
         self.assertEqual(sa._subcmd_attr, '_script_adaptor_%x' % id(sa))
+        self.assertFalse(mock_isclass.called)
+
+    @mock.patch('inspect.isclass', return_value=False)
+    def test_init_isclass(self, mock_isclass):
+        func = mock.Mock(__doc__="description")
+        sa = cli_tools.ScriptAdaptor(func, True)
+
+        self.assertEqual(sa._func, func)
+        self.assertTrue(sa._is_class)
+        self.assertEqual(sa._run, 'run')
+        self.assertTrue(callable(sa._args_hook))
+        self.assertEqual(sa._args_hook('foo'), None)
+        self.assertTrue(callable(sa._processor))
+        self.assertEqual(sa._processor('foo'), None)
+        self.assertEqual(sa._arguments, [])
+        self.assertEqual(sa._groups, {})
+        self.assertEqual(sa._subcommands, {})
+        self.assertEqual(sa._entrypoints, set())
+        self.assertEqual(sa.do_subs, False)
+        self.assertEqual(sa.subkwargs, {})
+        self.assertEqual(sa.prog, None)
+        self.assertEqual(sa.usage, None)
+        self.assertEqual(sa.description, 'description')
+        self.assertEqual(sa.epilog, None)
+        self.assertEqual(sa.formatter_class, argparse.HelpFormatter)
+        self.assertEqual(sa._subcmd_attr, '_script_adaptor_%x' % id(sa))
+        self.assertFalse(mock_isclass.called)
+
+    @mock.patch('inspect.isclass', return_value=False)
+    def test_init_discoverclass_false(self, mock_isclass):
+        func = mock.Mock(__doc__="description")
+        sa = cli_tools.ScriptAdaptor(func)
+
+        self.assertEqual(sa._func, func)
+        self.assertFalse(sa._is_class)
+        self.assertEqual(sa._run, None)
+        self.assertTrue(callable(sa._args_hook))
+        self.assertEqual(sa._args_hook('foo'), None)
+        self.assertTrue(callable(sa._processor))
+        self.assertEqual(sa._processor('foo'), None)
+        self.assertEqual(sa._arguments, [])
+        self.assertEqual(sa._groups, {})
+        self.assertEqual(sa._subcommands, {})
+        self.assertEqual(sa._entrypoints, set())
+        self.assertEqual(sa.do_subs, False)
+        self.assertEqual(sa.subkwargs, {})
+        self.assertEqual(sa.prog, None)
+        self.assertEqual(sa.usage, None)
+        self.assertEqual(sa.description, 'description')
+        self.assertEqual(sa.epilog, None)
+        self.assertEqual(sa.formatter_class, argparse.HelpFormatter)
+        self.assertEqual(sa._subcmd_attr, '_script_adaptor_%x' % id(sa))
+        mock_isclass.assert_called_once_with(func)
+
+    @mock.patch('inspect.isclass', return_value=True)
+    def test_init_discoverclass_true(self, mock_isclass):
+        func = mock.Mock(__doc__="description")
+        sa = cli_tools.ScriptAdaptor(func)
+
+        self.assertEqual(sa._func, func)
+        self.assertTrue(sa._is_class)
+        self.assertEqual(sa._run, 'run')
+        self.assertTrue(callable(sa._args_hook))
+        self.assertEqual(sa._args_hook('foo'), None)
+        self.assertTrue(callable(sa._processor))
+        self.assertEqual(sa._processor('foo'), None)
+        self.assertEqual(sa._arguments, [])
+        self.assertEqual(sa._groups, {})
+        self.assertEqual(sa._subcommands, {})
+        self.assertEqual(sa._entrypoints, set())
+        self.assertEqual(sa.do_subs, False)
+        self.assertEqual(sa.subkwargs, {})
+        self.assertEqual(sa.prog, None)
+        self.assertEqual(sa.usage, None)
+        self.assertEqual(sa.description, 'description')
+        self.assertEqual(sa.epilog, None)
+        self.assertEqual(sa.formatter_class, argparse.HelpFormatter)
+        self.assertEqual(sa._subcmd_attr, '_script_adaptor_%x' % id(sa))
+        mock_isclass.assert_called_once_with(func)
 
     def test_add_argument(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         sa._add_argument((1, 2, 3), dict(a=4, b=5, c=6), None)
         sa._add_argument((4, 5, 6), dict(a=1, b=2, c=3), None)
@@ -172,7 +286,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
     def test_add_group_newgroup(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         sa._add_group('group1', 'group', dict(a=1, b=2, c=3))
         sa._add_group('group2', 'exclusive', dict(a=3, b=2, c=1))
@@ -188,7 +302,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
     def test_add_group_oldgroup(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._groups['group'] = dict(type=None)
 
         self.assertRaises(argparse.ArgumentError, sa._add_group,
@@ -196,7 +310,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
     def test_add_subcommand(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         sa._add_subcommand('cmd', 'adaptor')
         sa._add_subcommand('dmc', 'rotpada')
@@ -206,7 +320,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
     def test_add_extensions(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         sa._add_extensions('group1')
         sa._add_extensions('group2')
@@ -220,13 +334,13 @@ class ScriptAdaptorTest(unittest.TestCase):
                                  mock_iter_entry_points):
         eps = {
             'ep1': mock.Mock(**{
-                'load.return_value': mock.Mock(_script_adaptor='adaptor1'),
+                'load.return_value': mock.Mock(cli_tools='adaptor1'),
             }),
             'ep2': mock.Mock(**{
-                'load.return_value': mock.Mock(_script_adaptor='adaptor2'),
+                'load.return_value': mock.Mock(cli_tools='adaptor2'),
             }),
             'ep3': mock.Mock(**{
-                'load.return_value': mock.Mock(_script_adaptor='adaptor3'),
+                'load.return_value': mock.Mock(cli_tools='adaptor3'),
             }),
         }
         for name, ep in eps.items():
@@ -244,7 +358,7 @@ class ScriptAdaptorTest(unittest.TestCase):
         mock_iter_entry_points.side_effect = lambda x: ep_groups[x]
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._entrypoints = set(['group1', 'group2'])
 
         sa._process_entrypoints()
@@ -262,7 +376,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
     def test_args_hook(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         result = sa.args_hook('func')
 
@@ -271,7 +385,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
     def test_processor(self):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         result = sa.processor('func')
 
@@ -283,7 +397,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_add_subcommand')
     def test_subcommand_basic(self, mock_add_subcommand, mock_get_adaptor):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         decorator = sa.subcommand('cmd')
 
@@ -302,7 +416,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_add_subcommand')
     def test_subcommand_derived(self, mock_add_subcommand, mock_get_adaptor):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         decorator = sa.subcommand()
 
@@ -321,7 +435,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_add_subcommand')
     def test_subcommand_noparams(self, mock_add_subcommand, mock_get_adaptor):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         subcmd = mock.Mock(__name__='subcmd')
 
         result = sa.subcommand(subcmd)
@@ -337,7 +451,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                         mock_process_entrypoints):
         parser = mock.Mock()
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._groups = {
             'group_key': {
                 'type': 'group',
@@ -403,7 +517,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
         parser = mock.Mock()
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._args_hook = mock.Mock(side_effect=hook)
         sa._groups = {
             'group_key': {
@@ -472,7 +586,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             parser.hook()
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._args_hook = mock.Mock(return_value=mock.Mock(**{
             'next.side_effect': hook,
         }))
@@ -552,7 +666,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             raise StopIteration
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._args_hook = mock.Mock(return_value=mock.Mock(**{
             'next.side_effect': hook,
         }))
@@ -634,7 +748,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                 do_stop[0] = True
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._args_hook = mock.Mock(return_value=mock.Mock(**{
             'next.side_effect': hook,
         }))
@@ -715,7 +829,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             }),
         })
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._groups = {
             'group_key': {
                 'type': 'group',
@@ -815,48 +929,172 @@ class ScriptAdaptorTest(unittest.TestCase):
         })
         mock_process_entrypoints.assert_called_once_with()
 
+    @mock.patch.object(inspect, 'isclass', return_value=False)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
     @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
         ('a', 'b', 'c'), None, None, None))
-    def test_get_kwargs(self, mock_getargspec):
+    def test_get_kwargs(self, mock_getargspec, mock_ismethod, mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
+
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2, c=3, d=4))
+
+        self.assertEqual(result, dict(a=1, b=2, c=3))
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_called_once_with(func2)
+        mock_ismethod.assert_called_once_with(func2)
+
+    @mock.patch.object(inspect, 'isclass', return_value=False)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
+    @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
+        ('a', 'b', 'c'), None, None, None))
+    def test_get_kwargs_compatibility(self, mock_getargspec, mock_ismethod,
+                                      mock_isclass):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
 
         result = sa.get_kwargs(argparse.Namespace(a=1, b=2, c=3, d=4))
 
         self.assertEqual(result, dict(a=1, b=2, c=3))
+        mock_isclass.assert_called_once_with(func)
         mock_getargspec.assert_called_once_with(func)
+        mock_ismethod.assert_called_once_with(func)
 
+    @mock.patch.object(inspect, 'isclass', return_value=False)
+    @mock.patch.object(inspect, 'ismethod', return_value=True)
+    @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
+        ('self', 'a', 'b', 'c'), None, None, None))
+    def test_get_kwargs_method(self, mock_getargspec, mock_ismethod,
+                               mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
+
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2, c=3, d=4))
+
+        self.assertEqual(result, dict(a=1, b=2, c=3))
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_called_once_with(func2)
+        mock_ismethod.assert_called_once_with(func2)
+
+    @mock.patch.object(inspect, 'isclass', return_value=True)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
+    @mock.patch.object(inspect, 'getargspec', side_effect=[
+        inspect.ArgSpec(('cls', 'a', 'b', 'c'), None, None, None),
+    ])
+    def test_get_kwargs_class_new(self, mock_getargspec, mock_ismethod,
+                                  mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
+
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2, c=3, d=4))
+
+        self.assertEqual(result, dict(a=1, b=2, c=3))
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_has_calls([
+            mock.call(func2.__new__),
+        ])
+        self.assertEqual(mock_getargspec.call_count, 1)
+        self.assertFalse(mock_ismethod.called)
+
+    @mock.patch.object(inspect, 'isclass', return_value=True)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
+    @mock.patch.object(inspect, 'getargspec', side_effect=[
+        TypeError,
+        inspect.ArgSpec(('self', 'a', 'b', 'c'), None, None, None),
+    ])
+    def test_get_kwargs_class_init(self, mock_getargspec, mock_ismethod,
+                                   mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
+
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2, c=3, d=4))
+
+        self.assertEqual(result, dict(a=1, b=2, c=3))
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_has_calls([
+            mock.call(func2.__new__),
+            mock.call(func2.__init__),
+        ])
+        self.assertEqual(mock_getargspec.call_count, 2)
+        self.assertFalse(mock_ismethod.called)
+
+    @mock.patch.object(inspect, 'isclass', return_value=True)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
+    @mock.patch.object(inspect, 'getargspec', side_effect=[
+        TypeError,
+        TypeError,
+        inspect.ArgSpec(('self', 'a', 'b', 'c'), None, None, None),
+    ])
+    def test_get_kwargs_class_nofunc(self, mock_getargspec, mock_ismethod,
+                                     mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
+
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2, c=3, d=4))
+
+        self.assertEqual(result, {})
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_has_calls([
+            mock.call(func2.__new__),
+            mock.call(func2.__init__),
+        ])
+        self.assertEqual(mock_getargspec.call_count, 2)
+        self.assertFalse(mock_ismethod.called)
+
+    @mock.patch.object(inspect, 'isclass', return_value=False)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
     @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
         ('a', 'b', 'c'), None, 'kwargs', None))
-    def test_get_kwargs_extra(self, mock_getargspec):
-        func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+    def test_get_kwargs_extra(self, mock_getargspec, mock_ismethod,
+                              mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
 
-        result = sa.get_kwargs(argparse.Namespace(a=1, b=2, c=3, d=4))
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2, c=3, d=4))
 
         self.assertEqual(result, dict(a=1, b=2, c=3, d=4))
-        mock_getargspec.assert_called_once_with(func)
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_called_once_with(func2)
+        mock_ismethod.assert_called_once_with(func2)
 
+    @mock.patch.object(inspect, 'isclass', return_value=False)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
     @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
         ('a', 'b', 'c'), None, None, None))
-    def test_get_kwargs_required(self, mock_getargspec):
-        func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+    def test_get_kwargs_required(self, mock_getargspec, mock_ismethod,
+                                 mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
 
         self.assertRaises(AttributeError, sa.get_kwargs,
-                          argparse.Namespace(a=1, b=2))
-        mock_getargspec.assert_called_once_with(func)
+                          func2, argparse.Namespace(a=1, b=2))
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_called_once_with(func2)
+        mock_ismethod.assert_called_once_with(func2)
 
+    @mock.patch.object(inspect, 'isclass', return_value=False)
+    @mock.patch.object(inspect, 'ismethod', return_value=False)
     @mock.patch.object(inspect, 'getargspec', return_value=inspect.ArgSpec(
         ('a', 'b', 'c'), None, None, (10,)))
-    def test_get_kwargs_optional(self, mock_getargspec):
-        func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+    def test_get_kwargs_optional(self, mock_getargspec, mock_ismethod,
+                                 mock_isclass):
+        func1 = mock.Mock(__doc__='')
+        func2 = mock.Mock()
+        sa = cli_tools.ScriptAdaptor(func1, False)
 
-        result = sa.get_kwargs(argparse.Namespace(a=1, b=2))
+        result = sa.get_kwargs(func2, argparse.Namespace(a=1, b=2))
 
         self.assertEqual(result, dict(a=1, b=2))
-        mock_getargspec.assert_called_once_with(func)
+        mock_isclass.assert_called_once_with(func2)
+        mock_getargspec.assert_called_once_with(func2)
+        mock_ismethod.assert_called_once_with(func2)
 
     @mock.patch('sys.exc_info')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
@@ -865,29 +1103,13 @@ class ScriptAdaptorTest(unittest.TestCase):
     def test_safe_call(self, mock_get_kwargs, mock_isgeneratorfunction,
                        mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func)
-        args = 'args'
-
-        result = sa.safe_call(args)
-
-        self.assertEqual(result, ('result', None))
-        mock_get_kwargs.assert_called_once_with('args')
-        func.assert_called_once_with(a=1, b=2, c=3)
-
-    @mock.patch('sys.exc_info')
-    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
-    @mock.patch.object(cli_tools.ScriptAdaptor, 'get_kwargs',
-                       return_value=dict(a=1, b=2, c=3))
-    def test_safe_call(self, mock_get_kwargs, mock_isgeneratorfunction,
-                       mock_exc_info):
-        func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, ('result', None))
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch('sys.exc_info', return_value=('type', 'exception', 'tb'))
@@ -897,27 +1119,98 @@ class ScriptAdaptorTest(unittest.TestCase):
     def test_safe_call_exc(self, mock_get_kwargs, mock_isgeneratorfunction,
                            mock_exc_info):
         func = mock.Mock(__doc__='', side_effect=TestException)
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, (None, ('type', 'exception', 'tb')))
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
+    @mock.patch('sys.exc_info')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
     @mock.patch.object(cli_tools.ScriptAdaptor, 'get_kwargs',
                        return_value=dict(a=1, b=2, c=3))
     def test_safe_call_exc_debug(self, mock_get_kwargs,
-                                 mock_isgeneratorfunction):
+                                 mock_isgeneratorfunction, mock_exc_info):
         func = mock.Mock(__doc__='', side_effect=TestException)
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         args = mock.Mock(debug=True)
 
         self.assertRaises(TestException, sa.safe_call, args)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
+        self.assertFalse(mock_exc_info.called)
+
+    @mock.patch('sys.exc_info')
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
+    @mock.patch.object(cli_tools.ScriptAdaptor, 'get_kwargs',
+                       return_value=dict(a=1, b=2, c=3))
+    def test_safe_call_class(self, mock_get_kwargs, mock_isgeneratorfunction,
+                             mock_exc_info):
+        obj = mock.Mock(**{
+            'run.return_value': 'result',
+        })
+        func = mock.Mock(__doc__='', return_value=obj)
+        sa = cli_tools.ScriptAdaptor(func, True)
+        args = mock.Mock(debug=False)
+
+        result = sa.safe_call(args)
+
+        self.assertEqual(result, ('result', None))
+        mock_get_kwargs.assert_has_calls([
+            mock.call(func, args),
+            mock.call(obj.run, args),
+        ])
+        func.assert_called_once_with(a=1, b=2, c=3)
+        obj.run.assert_called_once_with(a=1, b=2, c=3)
+
+    @mock.patch('sys.exc_info', return_value=('type', 'exception', 'tb'))
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
+    @mock.patch.object(cli_tools.ScriptAdaptor, 'get_kwargs',
+                       return_value=dict(a=1, b=2, c=3))
+    def test_safe_call_class_exc(self, mock_get_kwargs,
+                                 mock_isgeneratorfunction, mock_exc_info):
+        obj = mock.Mock(**{
+            'run.side_effect': TestException,
+        })
+        func = mock.Mock(__doc__='', return_value=obj)
+        sa = cli_tools.ScriptAdaptor(func, True)
+        args = mock.Mock(debug=False)
+
+        result = sa.safe_call(args)
+
+        self.assertEqual(result, (None, ('type', 'exception', 'tb')))
+        mock_get_kwargs.assert_has_calls([
+            mock.call(func, args),
+            mock.call(obj.run, args),
+        ])
+        func.assert_called_once_with(a=1, b=2, c=3)
+        obj.run.assert_called_once_with(a=1, b=2, c=3)
+
+    @mock.patch('sys.exc_info', return_value=('type', 'exception', 'tb'))
+    @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
+    @mock.patch.object(cli_tools.ScriptAdaptor, 'get_kwargs',
+                       return_value=dict(a=1, b=2, c=3))
+    def test_safe_call_class_exc_debug(self, mock_get_kwargs,
+                                       mock_isgeneratorfunction,
+                                       mock_exc_info):
+        obj = mock.Mock(**{
+            'run.side_effect': TestException,
+        })
+        func = mock.Mock(__doc__='', return_value=obj)
+        sa = cli_tools.ScriptAdaptor(func, True)
+        args = mock.Mock(debug=True)
+
+        self.assertRaises(TestException, sa.safe_call, args)
+        mock_get_kwargs.assert_has_calls([
+            mock.call(func, args),
+            mock.call(obj.run, args),
+        ])
+        func.assert_called_once_with(a=1, b=2, c=3)
+        obj.run.assert_called_once_with(a=1, b=2, c=3)
+        self.assertFalse(mock_exc_info.called)
 
     @mock.patch('sys.exc_info')
     @mock.patch.object(inspect, 'isgeneratorfunction', return_value=False)
@@ -926,7 +1219,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     def test_safe_call_proc_func(self, mock_get_kwargs,
                                  mock_isgeneratorfunction, mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._processor = mock.Mock()
         args = mock.Mock(debug=False)
 
@@ -934,7 +1227,7 @@ class ScriptAdaptorTest(unittest.TestCase):
 
         self.assertEqual(result, ('result', None))
         sa._processor.assert_called_once_with(args)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch('sys.exc_info')
@@ -945,7 +1238,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                                        mock_isgeneratorfunction,
                                        mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._processor = mock.Mock(return_value=mock.Mock(**{
             'next.side_effect': StopIteration,
         }))
@@ -959,7 +1252,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.next(),
         ])
         self.assertEqual(len(sa._processor.return_value.method_calls), 1)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch('sys.exc_info')
@@ -970,7 +1263,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                    mock_isgeneratorfunction,
                                                    mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._processor = mock.Mock(return_value=mock.Mock(**{
             'send.side_effect': StopIteration,
         }))
@@ -986,7 +1279,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.close(),
         ])
         self.assertEqual(len(sa._processor.return_value.method_calls), 3)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch('sys.exc_info')
@@ -997,7 +1290,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                  mock_isgeneratorfunction,
                                                  mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._processor = mock.Mock(return_value=mock.Mock(**{
             'send.return_value': 'override',
         }))
@@ -1013,7 +1306,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.close(),
         ])
         self.assertEqual(len(sa._processor.return_value.method_calls), 3)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch('sys.exc_info', return_value=('type', 'exception', 'tb'))
@@ -1024,7 +1317,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                    mock_isgeneratorfunction,
                                                    mock_exc_info):
         func = mock.Mock(__doc__='', side_effect=TestException)
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._processor = mock.Mock(return_value=mock.Mock(**{
             'throw.return_value': 'thrown',
         }))
@@ -1040,7 +1333,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.close(),
         ])
         self.assertEqual(len(sa._processor.return_value.method_calls), 3)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch('sys.exc_info', side_effect=[
@@ -1054,7 +1347,7 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                  mock_isgeneratorfunction,
                                                  mock_exc_info):
         func = mock.Mock(__doc__='', side_effect=TestException)
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._processor = mock.Mock(return_value=mock.Mock(**{
             'throw.side_effect': TestException,
         }))
@@ -1070,7 +1363,7 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.close(),
         ])
         self.assertEqual(len(sa._processor.return_value.method_calls), 3)
-        mock_get_kwargs.assert_called_once_with(args)
+        mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
     @mock.patch.object(argparse, 'ArgumentParser', return_value=mock.Mock(**{
@@ -1082,7 +1375,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     def test_console_basic(self, mock_safe_call, mock_setup_args,
                            mock_ArgumentParser):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa.prog = 'program'
         sa.usage = 'usage'
         sa.description = 'description'
@@ -1110,7 +1403,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     def test_console_exception(self, mock_safe_call, mock_setup_args,
                                mock_ArgumentParser):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa.prog = 'program'
         sa.usage = 'usage'
         sa.description = 'description'
@@ -1133,7 +1426,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     def test_console_subcmd(self, mock_safe_call, mock_setup_args,
                             mock_ArgumentParser):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa.do_subs = True
         adaptor = mock.Mock(**{'safe_call.return_value': ('tluser', None)})
         args = mock.Mock(**{sa._subcmd_attr: adaptor})
@@ -1149,7 +1442,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     def test_get_subcommands_nosubs(self, mock_process_entrypoints):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._subcommands = mock.Mock(**{'items.return_value': [
             ('cmd', mock.Mock(_func='subcmd')),
             ('dmc', mock.Mock(_func='subdmc')),
@@ -1163,7 +1456,7 @@ class ScriptAdaptorTest(unittest.TestCase):
     @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
     def test_get_subcommands(self, mock_process_entrypoints):
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func)
+        sa = cli_tools.ScriptAdaptor(func, False)
         sa._subcommands = mock.Mock(**{'items.return_value': [
             ('cmd', mock.Mock(_func='subcmd')),
             ('dmc', mock.Mock(_func='subdmc')),

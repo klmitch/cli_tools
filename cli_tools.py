@@ -113,33 +113,41 @@ class ScriptAdaptor(object):
     @classmethod
     def _get_adaptor(cls, func):
         """
-        Gets the ScriptAdaptor for a function.
+        Gets the ``ScriptAdaptor`` for a function.
 
-        :param func: The function to obtain the ScriptAdaptor of.
+        :param func: The function to obtain the ``ScriptAdaptor`` of.
 
-        :returns: The ScriptAdaptor.
+        :returns: The ``ScriptAdaptor``.
         """
 
         # Get the adaptor, creating one if necessary
-        adaptor = getattr(func, '_script_adaptor', None)
+        adaptor = getattr(func, 'cli_tools', None)
         if adaptor is None:
-            adaptor = cls(func)
-            func._script_adaptor = adaptor
+            is_class = inspect.isclass(func)
+
+            adaptor = cls(func, is_class)
+            func.cli_tools = adaptor
 
             # Set up the added functions
-            for meth in cls.exposed:
-                setattr(func, meth, getattr(adaptor, meth))
+            if not is_class:
+                for meth in cls.exposed:
+                    setattr(func, meth, getattr(adaptor, meth))
 
         return adaptor
 
-    def __init__(self, func):
+    def __init__(self, func, is_class=None):
         """
-        Initialize a ScriptAdaptor.
+        Initialize a ``ScriptAdaptor``.
 
         :param func: The underlying function.
+        :param is_class: A boolean specifying whether the ``func`` is
+                         actually a class.
         """
 
         self._func = func
+        self._is_class = (is_class if is_class is not None
+                          else inspect.isclass(func))
+        self._run = 'run' if self._is_class else None
         self._args_hook = lambda x: None
         self._processor = lambda x: None
         self._arguments = []
@@ -252,7 +260,7 @@ class ScriptAdaptor(object):
             for ep in pkg_resources.iter_entry_points(group):
                 try:
                     func = ep.load()
-                    self._add_subcommand(ep.name, func._script_adaptor)
+                    self._add_subcommand(ep.name, func.cli_tools)
                 except (ImportError, AttributeError,
                         pkg_resources.UnknownExtra):
                     # Ignore any expected errors
@@ -455,14 +463,15 @@ class ScriptAdaptor(object):
                 post(parser)
 
     @expose
-    def get_kwargs(self, args):
+    def get_kwargs(self, func, args=None):
         """
         Given an ``argparse.Namespace``, as produced by
         ``argparse.ArgumentParser.parse_args()``, determines the
-        keyword arguments to pass to the underlying function.  Note
+        keyword arguments to pass to the specified function.  Note
         that an ``AttributeError`` exception will be raised if any
         argument required by the function is not set in ``args``.
 
+        :param func: A callable to introspect.
         :param args: A ``argparse.Namespace`` object containing the
                      argument values.
 
@@ -470,12 +479,39 @@ class ScriptAdaptor(object):
                   passed to the underlying function.
         """
 
+        # For backwards compatibility, handle the case when we were
+        # called with only one argument
+        if args is None:
+            args = func
+            func = self._func
+
+        # Get the argument spec for the correct underlying function
+        if inspect.isclass(func):
+            try:
+                # Try __new__() first; this will raise a TypeError if
+                # __new__() hasn't been overridden
+                argspec = inspect.getargspec(func.__new__)
+                ismethod = True
+            except TypeError:
+                try:
+                    # OK, no __new__(); try __init__()
+                    argspec = inspect.getargspec(func.__init__)
+                    ismethod = True
+                except TypeError:
+                    # OK, no __init__(); that means that the class
+                    # initializer takes no arguments
+                    argspec = inspect.ArgSpec([], None, None, None)
+                    ismethod = False
+        else:
+            argspec = inspect.getargspec(func)
+            ismethod = inspect.ismethod(func)
+
         # We need to figure out which arguments the final function
         # actually needs
         kwargs = {}
-        argspec = inspect.getargspec(self._func)
-        required = set(argspec.args[:-len(argspec.defaults)]
-                       if argspec.defaults else argspec.args)
+        req_args = (argspec.args[:-len(argspec.defaults)]
+                    if argspec.defaults else argspec.args)
+        required = set(req_args[1:] if ismethod else req_args)
         for arg_name in argspec.args:
             try:
                 kwargs[arg_name] = getattr(args, arg_name)
@@ -530,12 +566,25 @@ class ScriptAdaptor(object):
 
         try:
             # Call the function
-            result = self._func(**self.get_kwargs(args))
+            result = self._func(**self.get_kwargs(self._func, args))
         except Exception:
             if args and getattr(args, 'debug', False):
                 # Re-raise if desired
                 raise
             exc_info = sys.exc_info()
+
+        if self._is_class:
+            # All we've done so far is initialize the class; now we
+            # need to actually run it
+            try:
+                meth = getattr(result, self._run)
+                result = meth(**self.get_kwargs(meth, args))
+            except Exception:
+                if args and getattr(args, 'debug', False):
+                    # Re-raise if desired
+                    raise
+                result = None  # must clear result
+                exc_info = sys.exc_info()
 
         # If the processor has a post phase, run it
         if post:
