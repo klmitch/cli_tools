@@ -21,7 +21,7 @@ def readfile(filename):
 
 setup(
     name='cli_tools',
-    version='0.2.5',
+    version='0.3.0',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
     url='https://github.com/klmitch/cli_tools',
