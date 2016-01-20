@@ -21,7 +21,7 @@ def readfile(filename):
 
 setup(
     name='cli_tools',
-    version='0.3.0',
+    version='0.4.0',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
     url='https://github.com/klmitch/cli_tools',
@@ -34,7 +34,6 @@ setup(
         'License :: OSI Approved :: GNU General Public License v3 or '
         'later (GPLv3+)',
         'Operating System :: OS Independent',
-        'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
