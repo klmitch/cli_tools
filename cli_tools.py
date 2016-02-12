@@ -406,7 +406,7 @@ class ScriptAdaptor(object):
         if inspect.isgeneratorfunction(self._args_hook):
             post = self._args_hook(parser)
             try:
-                post.next()
+                six.next(post)
             except StopIteration:
                 # Won't be doing any post-processing anyway
                 post = None
@@ -455,7 +455,7 @@ class ScriptAdaptor(object):
         if post:
             if inspect.isgenerator(post):
                 try:
-                    post.next()
+                    six.next(post)
                 except StopIteration:
                     pass
                 post.close()
@@ -553,7 +553,7 @@ class ScriptAdaptor(object):
         if inspect.isgeneratorfunction(self._processor):
             post = self._processor(args)
             try:
-                post.next()
+                six.next(post)
             except StopIteration:
                 # Won't be doing any post-processing anyway
                 post = None

@@ -29,6 +29,38 @@ class TestException(Exception):
     pass
 
 
+class MockGen(six.Iterator):
+    def __init__(self, generator):
+        self.generator = generator
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.generator.next()
+
+    def send(self, value):
+        return self.generator.send(value)
+
+    def throw(self, exc_type, exc_value=None, exc_tb=None):
+        return self.generator.throw(exc_type, exc_value, exc_tb)
+
+    def close(self):
+        return self.generator.close()
+
+
+class MockGenFunc(object):
+    def __init__(self, generator):
+        self.generator = generator
+
+    def __call__(self, *args, **kwargs):
+        # Log in the call, but ignore return value
+        self.generator.call(*args, **kwargs)
+
+        # It'll always be a MockGen object
+        return MockGen(self.generator)
+
+
 class CleanTextTest(unittest.TestCase):
     def test_clean_text(self):
         text = """
@@ -586,10 +618,11 @@ class ScriptAdaptorTest(unittest.TestCase):
             parser.hook()
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func, False)
-        sa._args_hook = mock.Mock(return_value=mock.Mock(**{
+        gen = mock.Mock(**{
             'next.side_effect': hook,
-        }))
+        })
+        sa = cli_tools.ScriptAdaptor(func, False)
+        sa._args_hook = MockGenFunc(gen)
         sa._groups = {
             'group_key': {
                 'type': 'group',
@@ -644,13 +677,13 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
             mock.call.hook(),
         ])
-        sa._args_hook.assert_called_once_with(parser)
-        sa._args_hook.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(parser),
             mock.call.next(),
             mock.call.next(),
             mock.call.close(),
         ])
-        self.assertEqual(len(sa._args_hook.return_value.method_calls), 3)
+        self.assertEqual(len(gen.method_calls), 4)
         self.assertFalse(mock_process_entrypoints.called)
 
     @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
@@ -666,10 +699,11 @@ class ScriptAdaptorTest(unittest.TestCase):
             raise StopIteration
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func, False)
-        sa._args_hook = mock.Mock(return_value=mock.Mock(**{
+        gen = mock.Mock(**{
             'next.side_effect': hook,
-        }))
+        })
+        sa = cli_tools.ScriptAdaptor(func, False)
+        sa._args_hook = MockGenFunc(gen)
         sa._groups = {
             'group_key': {
                 'type': 'group',
@@ -723,11 +757,11 @@ class ScriptAdaptorTest(unittest.TestCase):
                 .add_argument(4, 5, 6, a=7, b=8, c=9),
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
         ])
-        sa._args_hook.assert_called_once_with(parser)
-        sa._args_hook.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(parser),
             mock.call.next(),
         ])
-        self.assertEqual(len(sa._args_hook.return_value.method_calls), 1)
+        self.assertEqual(len(gen.method_calls), 2)
         self.assertFalse(mock_isgenerator.called)
         self.assertFalse(mock_process_entrypoints.called)
 
@@ -748,10 +782,11 @@ class ScriptAdaptorTest(unittest.TestCase):
                 do_stop[0] = True
 
         func = mock.Mock(__doc__='')
-        sa = cli_tools.ScriptAdaptor(func, False)
-        sa._args_hook = mock.Mock(return_value=mock.Mock(**{
+        gen = mock.Mock(**{
             'next.side_effect': hook,
-        }))
+        })
+        sa = cli_tools.ScriptAdaptor(func, False)
+        sa._args_hook = MockGenFunc(gen)
         sa._groups = {
             'group_key': {
                 'type': 'group',
@@ -806,13 +841,13 @@ class ScriptAdaptorTest(unittest.TestCase):
             mock.call.add_argument(0, 1, 2, a=3, b=4, c=5),
             mock.call.hook(),
         ])
-        sa._args_hook.assert_called_once_with(parser)
-        sa._args_hook.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(parser),
             mock.call.next(),
             mock.call.next(),
             mock.call.close(),
         ])
-        self.assertEqual(len(sa._args_hook.return_value.method_calls), 3)
+        self.assertEqual(len(gen.method_calls), 4)
         self.assertFalse(mock_process_entrypoints.called)
 
     @mock.patch.object(cli_tools.ScriptAdaptor, '_process_entrypoints')
@@ -1238,20 +1273,21 @@ class ScriptAdaptorTest(unittest.TestCase):
                                        mock_isgeneratorfunction,
                                        mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
+        gen = mock.Mock(**{
+            'next.side_effect': StopIteration(),
+        })
         sa = cli_tools.ScriptAdaptor(func, False)
-        sa._processor = mock.Mock(return_value=mock.Mock(**{
-            'next.side_effect': StopIteration,
-        }))
+        sa._processor = MockGenFunc(gen)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, ('result', None))
-        sa._processor.assert_called_once_with(args)
-        sa._processor.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(args),
             mock.call.next(),
         ])
-        self.assertEqual(len(sa._processor.return_value.method_calls), 1)
+        self.assertEqual(len(gen.method_calls), 2)
         mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
@@ -1263,22 +1299,23 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                    mock_isgeneratorfunction,
                                                    mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
+        gen = mock.Mock(**{
+            'send.side_effect': StopIteration(),
+        })
         sa = cli_tools.ScriptAdaptor(func, False)
-        sa._processor = mock.Mock(return_value=mock.Mock(**{
-            'send.side_effect': StopIteration,
-        }))
+        sa._processor = MockGenFunc(gen)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, ('result', None))
-        sa._processor.assert_called_once_with(args)
-        sa._processor.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(args),
             mock.call.next(),
             mock.call.send('result'),
             mock.call.close(),
         ])
-        self.assertEqual(len(sa._processor.return_value.method_calls), 3)
+        self.assertEqual(len(gen.method_calls), 4)
         mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
@@ -1290,22 +1327,23 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                  mock_isgeneratorfunction,
                                                  mock_exc_info):
         func = mock.Mock(__doc__='', return_value='result')
-        sa = cli_tools.ScriptAdaptor(func, False)
-        sa._processor = mock.Mock(return_value=mock.Mock(**{
+        gen = mock.Mock(**{
             'send.return_value': 'override',
-        }))
+        })
+        sa = cli_tools.ScriptAdaptor(func, False)
+        sa._processor = MockGenFunc(gen)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, ('override', None))
-        sa._processor.assert_called_once_with(args)
-        sa._processor.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(args),
             mock.call.next(),
             mock.call.send('result'),
             mock.call.close(),
         ])
-        self.assertEqual(len(sa._processor.return_value.method_calls), 3)
+        self.assertEqual(len(gen.method_calls), 4)
         mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
@@ -1317,22 +1355,23 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                    mock_isgeneratorfunction,
                                                    mock_exc_info):
         func = mock.Mock(__doc__='', side_effect=TestException)
-        sa = cli_tools.ScriptAdaptor(func, False)
-        sa._processor = mock.Mock(return_value=mock.Mock(**{
+        gen = mock.Mock(**{
             'throw.return_value': 'thrown',
-        }))
+        })
+        sa = cli_tools.ScriptAdaptor(func, False)
+        sa._processor = MockGenFunc(gen)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, ('thrown', None))
-        sa._processor.assert_called_once_with(args)
-        sa._processor.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(args),
             mock.call.next(),
             mock.call.throw('type', 'exception', 'tb'),
             mock.call.close(),
         ])
-        self.assertEqual(len(sa._processor.return_value.method_calls), 3)
+        self.assertEqual(len(gen.method_calls), 4)
         mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
@@ -1347,22 +1386,23 @@ class ScriptAdaptorTest(unittest.TestCase):
                                                  mock_isgeneratorfunction,
                                                  mock_exc_info):
         func = mock.Mock(__doc__='', side_effect=TestException)
+        gen = mock.Mock(**{
+            'throw.side_effect': TestException(),
+        })
         sa = cli_tools.ScriptAdaptor(func, False)
-        sa._processor = mock.Mock(return_value=mock.Mock(**{
-            'throw.side_effect': TestException,
-        }))
+        sa._processor = MockGenFunc(gen)
         args = mock.Mock(debug=False)
 
         result = sa.safe_call(args)
 
         self.assertEqual(result, (None, ('otype', 'something', 'bt')))
-        sa._processor.assert_called_once_with(args)
-        sa._processor.return_value.assert_has_calls([
+        gen.assert_has_calls([
+            mock.call.call(args),
             mock.call.next(),
             mock.call.throw('type', 'exception', 'tb'),
             mock.call.close(),
         ])
-        self.assertEqual(len(sa._processor.return_value.method_calls), 3)
+        self.assertEqual(len(gen.method_calls), 4)
         mock_get_kwargs.assert_called_once_with(func, args)
         func.assert_called_once_with(a=1, b=2, c=3)
 
