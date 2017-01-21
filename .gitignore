@@ -1,4 +1,5 @@
 /build
+/.cache
 /.coverage
 /cov_html
 /dist

@@ -424,7 +424,7 @@ class ScriptAdaptor(object):
                     group = parser.add_mutually_exclusive_group(**kwargs)
                 else:
                     # Huh, don't know that group...
-                    continue  # Pragma: nocover
+                    continue  # pragma: no cover
 
                 # Set up all the arguments
                 for a_args, a_kwargs in arguments:
