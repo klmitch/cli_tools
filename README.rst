@@ -2,6 +2,9 @@
 Command Line Interface Tools
 ============================
 
+.. image:: https://travis-ci.org/klmitch/cli_tools.svg?branch=master
+    :target: https://travis-ci.org/klmitch/cli_tools
+
 The command line interface tools module provides several decorators
 which can be applied to a regular function to turn it into a console
 script.  It is designed to adapt a function so that it can be used as
