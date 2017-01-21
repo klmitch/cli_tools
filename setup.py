@@ -21,14 +21,14 @@ def readfile(filename):
 
 setup(
     name='cli_tools',
-    version='0.4.1',
+    version='1.0.0',
     author='Kevin L. Mitchell',
     author_email='klmitch@mit.edu',
     url='https://github.com/klmitch/cli_tools',
     description="Command Line Interface Tools",
     long_description=readfile('README.rst'),
     classifiers=[
-        'Development Status :: 4 - Beta',
+        'Development Status :: 5 - Production/Stable',
         'Environment :: Console',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: Apache Software License',
