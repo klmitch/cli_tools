@@ -1,12 +1,18 @@
 sudo: false
 language: python
-python:
-  - "2.7"
-  - "3.3"
-  - "3.4"
-  - "3.5"
-  - "3.6"
-install: pip install tox-travis
-script:
-  - tox -e pep8
-  - tox
+matrix:
+  include:
+    - python: "2.7"
+      env: TEST_ENV=pep8
+    - python: "2.7"
+      env: TEST_ENV=py27
+    - python: "3.3"
+      env: TEST_ENV=py33
+    - python: "3.4"
+      env: TEST_ENV=py34
+    - python: "3.5"
+      env: TEST_ENV=py35
+    - python: "3.6"
+      env: TEST_ENV=py36
+install: pip install tox
+script: tox -e ${TEST_ENV}
